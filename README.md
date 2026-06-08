@@ -198,6 +198,68 @@ Each sidebar section has a RESET button (two-click confirmation) that restores d
 
 ---
 
+## Live Telemetry Integration
+
+SUSP.OS supports real-time telemetry integration with **Forza Horizon** and **Forza Motorsport**. This allows the calculator to automatically identify your car, populate baseline specifications, detect the drivetrain layout, and dynamically estimate the upgraded car's weight from live driving data.
+
+### Architecture
+
+The telemetry connection uses a lightweight, zero-dependency Node.js bridge server:
+- **`forza-bridge.js`**: A backend server that listens for binary UDP telemetry packets sent by the game on port `5600`, parses the data using Little-Endian format, and broadcasts the parsed telemetry as serialized JSON via a Server-Sent Events (SSE) stream at `http://localhost:5601/telemetry`.
+- **`launch.bat`**: A convenient Windows batch file that starts the `forza-bridge.js` server and automatically opens the `index.html` frontend app in your default web browser in a single double-click.
+
+### In-Game Configuration
+
+To feed telemetry data to the bridge, you must configure the HUD settings inside the game:
+1. Open Forza and navigate to **Settings > HUD and Gameplay**.
+2. Scroll down to the bottom to find the **Data Out** section.
+3. Configure the following settings:
+   - **Data Out**: `ON`
+   - **Data Out IP Address**: `127.0.0.1` (or your PC's local network IP if playing on Xbox)
+   - **Data Out Port**: `5600`
+
+### Setup and Running
+
+To run the telemetry bridge:
+1. Open the repository folder.
+2. Double-click `launch.bat` (on Windows), or run the bridge manually using:
+   ```bash
+   node forza-bridge.js
+   ```
+3. Open `index.html` in your browser.
+4. Expand the **LIVE TELEMETRY** panel in the sidebar, verify the URL is set to `http://localhost:5601/telemetry`, and click **CONNECT**. The indicator will turn green once it connects to the bridge.
+
+> [!NOTE]
+> **Windows AppContainer Loopback Workaround (PC Microsoft Store / Game Pass users)**:
+> Windows sandboxes UWP apps, which prevents Microsoft Store/Game Pass versions of Forza from sending UDP traffic to localhost (`127.0.0.1`). If you are running the game and bridge on the same PC, you must enable loopback exemption.
+> - **Option A**: Use a GUI utility like the **AppContainer Loopback Exemption Utility** and check the box for Forza.
+> - **Option B**: Open Command Prompt as an Administrator and execute:
+>   ```cmd
+>   CheckNetIsolation.exe LoopbackExempt -a -n="Microsoft.624F8B84B80_8wekyb3d8bbwe"
+>   ```
+>   *(Use `Microsoft.624F8B84B80_8wekyb3d8bbwe` for Forza Horizon 5, `Microsoft.ForzaMotorsport_8wekyb3d8bbwe` for Forza Motorsport, or `Microsoft.SunriseBaseGame_8wekyb3d8bbwe` for Forza Horizon 4).*
+
+### Input Synchronization & Lock Badges (🔒/🔓)
+
+Beside the **Weight**, **Front Weight Bias**, and **Drivetrain Layout** inputs, you will see a lock badge:
+- **Locked (🔒)**: When connected to live telemetry, these inputs will automatically synchronize with incoming data.
+  - **Drivetrain Layout**: Instantly set to FWD, RWD, or AWD based on the active car.
+  - **Weight & Bias**: If the game transmits a recognized `CarOrdinal`, SUSP.OS performs a lookup in its local database (`CAR_DATABASE`) and automatically fills in the stock weight and front bias.
+  - **Dynamic Weight Estimation**: If the car has aftermarket upgrades that alter its weight, SUSP.OS will dynamically calculate the new weight while you drive (see details below).
+- **Unlocked (🔓)**: Click the lock icon to toggle it. When unlocked, you can manually override and edit these values. Telemetry updates will be ignored for these inputs.
+
+### Dynamic Weight Estimation
+
+Because Forza does not output the car's current upgraded weight in the telemetry stream, SUSP.OS estimates it dynamically using Newtonian physics from active driving telemetry:
+$$\text{Mass (kg)} = \frac{\text{Power (Watts)}}{\text{Velocity (m/s)} \times \text{Longitudinal Acceleration (m/s}^2\text{)}}$$
+
+To ensure accuracy and filter out noise (such as tyre slip, gear shifts, or elevation changes), the calculation is strictly constrained:
+- **Active Accel**: Throttle must be $> 80\%$ (`throttle > 204`) and brake must be completely off (`brake === 0`).
+- **Speed & Accel Thresholds**: Speed must be $> 10\text{ m/s}$ (approx. $22\text{ mph}$) and longitudinal acceleration must be $> 0.5\text{ m/s}^2$ to avoid divisions by zero.
+- **Median Filtering**: Calculated mass samples are pushed into a sliding window queue (size 80). The live estimated weight shown in the UI is the filtered median of these samples, requiring at least 15 valid samples to begin displaying.
+
+---
+
 ## Calibration
 
 Key empirical constants calibrated from real Forza data:

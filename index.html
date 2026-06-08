@@ -708,6 +708,20 @@ const DEF_AL={alignManual:false,
 const DEF_BR={brakeManual:false,brakeBias:50,brakePressure:100};
 const BRAKE_BIAS_SCALE=0.20;
 
+const CAR_DATABASE = {
+  "2351": { name: "1965 Lotus Cortina", weight: 1699, frontBias: 51, layout: "RWD" },
+  "1234": { name: "2019 Porsche 911 GT3 RS", weight: 3150, frontBias: 40, layout: "RWD" },
+  "5678": { name: "2020 Chevrolet Corvette Stingray", weight: 3647, frontBias: 40, layout: "RWD" },
+  "1066": { name: "2021 Ford Bronco", weight: 4500, frontBias: 52, layout: "AWD" }
+};
+
+const getMedian = (arr) => {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
 const PRESET_SAVES=(()=>{
   const ref=Math.round(cornerMasses(DEF_CH).front);
   return{
@@ -794,7 +808,7 @@ const Hint=({text})=>{
   );
 };
 
-const Field=({label,value,onChange,min,max,step=0.01,unit='',hint=null,logScale=false,logMid=null})=>{
+const Field=({label,value,onChange,min,max,step=0.01,unit='',hint=null,logScale=false,logMid=null,locked=false,onToggleLock=null})=>{
   const mid=logMid??Math.sqrt(min*max);
   const valToT=v=>{
     if(!logScale)return(v-min)/(max-min);
@@ -826,6 +840,7 @@ const Field=({label,value,onChange,min,max,step=0.01,unit='',hint=null,logScale=
   useLayoutEffect(()=>{draftRef.current=draft;},[draft]);
   useEffect(()=>{
     const onWheel=e=>{
+      if(locked)return;
       const focused=document.activeElement===numRef.current||document.activeElement===sliRef.current;
       if(!focused)return;
       e.preventDefault();
@@ -846,21 +861,38 @@ const Field=({label,value,onChange,min,max,step=0.01,unit='',hint=null,logScale=
       n&&n.removeEventListener('wheel',onWheel);
       s&&s.removeEventListener('wheel',onWheel);
     };
-  },[min,max,step,logScale]);
+  },[min,max,step,logScale,locked]);
   return(
     <div style={{marginBottom:10}}>
       <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
         <span style={{fontSize:12,color:'#9ca3af',minWidth:0,overflow:'hidden',
-                      textOverflow:'ellipsis',whiteSpace:'nowrap',marginRight:6}}>
-          {label}{hint&&<Hint text={hint}/>}
+                      textOverflow:'ellipsis',whiteSpace:'nowrap',marginRight:6,
+                      display:'flex',alignItems:'center',gap:4}}>
+          {onToggleLock && (
+            <span 
+              onClick={onToggleLock}
+              style={{
+                cursor:'pointer',
+                marginRight:4,
+                userSelect:'none',
+                fontSize:12
+              }}
+              title={locked ? "Locked to Telemetry" : "Unlocked (Manual Edit)"}
+            >
+              {locked ? '🔒' : '🔓'}
+            </span>
+          )}
+          <span>{label}</span>{hint&&<Hint text={hint}/>}
         </span>
         <div style={{display:'flex',alignItems:'center',gap:3,flexShrink:0}}>
           <input ref={numRef} type="number" className="num" min={min} max={max} step={logScale?1:step}
             value={focused?draft:value}
-            onFocus={()=>setDraft(String(value))}
-            onChange={e=>setDraft(e.target.value)}
+            onFocus={()=>!locked&&setDraft(String(value))}
+            onChange={e=>!locked&&setDraft(e.target.value)}
             onBlur={commit}
-            onKeyDown={e=>{if(e.key==='Enter')e.target.blur();}}/>
+            onKeyDown={e=>{if(e.key==='Enter')e.target.blur();}}
+            readOnly={locked}
+            style={locked ? {opacity:0.7} : undefined}/>
           {unit&&<span style={{fontSize:10,color:'#94a3b8',fontFamily:'Courier New',
                                whiteSpace:'nowrap'}}>{unit}</span>}
         </div>
@@ -868,10 +900,14 @@ const Field=({label,value,onChange,min,max,step=0.01,unit='',hint=null,logScale=
       <input ref={sliRef} type="range" className="sli" min={0} max={1} step={0.0001}
         value={logScale?t:undefined}
         {...(!logScale&&{min,max,step,value})}
-        style={{background:`linear-gradient(to right,#e2e8f0 ${pct}%,#1e293b ${pct}%)`}}
-        onChange={e=>onChange(logScale
-          ?Math.round(clamp(tToVal(parseFloat(e.target.value))))
-          :parseFloat(e.target.value))}/>
+        disabled={locked}
+        style={{background:`linear-gradient(to right,#e2e8f0 ${pct}%,#1e293b ${pct}%)`, opacity: locked ? 0.7 : 1, cursor: locked ? 'not-allowed' : 'pointer'}}
+        onChange={e=>{
+          if(locked)return;
+          onChange(logScale
+            ?Math.round(clamp(tToVal(parseFloat(e.target.value))))
+            :parseFloat(e.target.value));
+        }}/>
     </div>
   );
 };
@@ -1216,12 +1252,32 @@ const ArbRangeSlider=({floor,ceil,onFloor,onCeil,min=1,max=65})=>{
 };
 
 
-const Toggle=({label,value,onChange,options})=>(
+const Toggle=({label,value,onChange,options,locked=false,onToggleLock=null})=>(
   <div style={{marginBottom:9}}>
-    {label&&<span style={{fontSize:12,color:'#9ca3af',display:'block',marginBottom:3}}>{label}</span>}
-    <div style={{display:'flex',gap:3}}>
+    {(label || onToggleLock) && (
+      <span style={{fontSize:12,color:'#9ca3af',display:'flex',alignItems:'center',gap:4,marginBottom:3}}>
+        {onToggleLock && (
+          <span 
+            onClick={onToggleLock}
+            style={{
+              cursor:'pointer',
+              marginRight:4,
+              userSelect:'none',
+              fontSize:12
+            }}
+            title={locked ? "Locked to Telemetry" : "Unlocked (Manual Edit)"}
+          >
+            {locked ? '🔒' : '🔓'}
+          </span>
+        )}
+        {label && <span>{label}</span>}
+      </span>
+    )}
+    <div style={{display:'flex',gap:3,opacity: locked ? 0.7 : 1}}>
       {options.map(o=><button key={o.value} className={`tog${value===o.value?' on':''}`}
-        onClick={()=>onChange(o.value)}>{o.label}</button>)}
+        disabled={locked}
+        style={locked ? {cursor:'not-allowed'} : undefined}
+        onClick={()=>!locked&&onChange(o.value)}>{o.label}</button>)}
     </div>
   </div>
 );
@@ -2020,6 +2076,175 @@ function App(){
   const[saves,setSaves]=usePersist('suspos_saves_v9',PRESET_SAVES);
   const[uiMode,setUiMode]=usePersist('suspos_uimode_v1','beginner');
   const[uiZoom,setUiZoom]=usePersist('suspos_zoom_v1',1.1);
+
+  const[telemetryConnected,setTelemetryConnected]=useState('disconnected');
+  const[telemetryData,setTelemetryData]=useState(null);
+  const[telemetryUrl,setTelemetryUrl]=useState('http://localhost:5601/telemetry');
+  const[peakHp,setPeakHp]=useState(0);
+  const[peakTorque,setPeakTorque]=useState(0);
+  const[weightLocked,setWeightLocked]=useState(true);
+  const[frontBiasLocked,setFrontBiasLocked]=useState(true);
+  const[layoutLocked,setLayoutLocked]=useState(true);
+  const[weightEstimates,setWeightEstimates]=useState([]);
+
+  const weightLockedRef = useRef(weightLocked);
+  const frontBiasLockedRef = useRef(frontBiasLocked);
+  const layoutLockedRef = useRef(layoutLocked);
+  const metricUnitsRef = useRef(metricUnits);
+
+  useLayoutEffect(() => { weightLockedRef.current = weightLocked; }, [weightLocked]);
+  useLayoutEffect(() => { frontBiasLockedRef.current = frontBiasLocked; }, [frontBiasLocked]);
+  useLayoutEffect(() => { layoutLockedRef.current = layoutLocked; }, [layoutLocked]);
+  useLayoutEffect(() => { metricUnitsRef.current = metricUnits; }, [metricUnits]);
+
+  const estimatedWeight = useMemo(() => getMedian(weightEstimates), [weightEstimates]);
+
+  const handleTelemetryToggle = () => {
+    if (telemetryConnected === 'disconnected') {
+      setTelemetryConnected('connecting');
+    } else {
+      setTelemetryConnected('disconnected');
+      setTelemetryData(null);
+    }
+  };
+
+  // SSE Connection logic
+  useEffect(() => {
+    if (telemetryConnected === 'disconnected') return;
+
+    let es;
+    try {
+      es = new EventSource(telemetryUrl);
+      
+      es.onopen = () => {
+        setTelemetryConnected('connected');
+      };
+
+      es.onerror = () => {
+        setTelemetryConnected('disconnected');
+        if (es) es.close();
+      };
+
+      es.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          setTelemetryData(data);
+          
+          if (data.IsRaceOn) {
+            // HP and Torque tracking
+            const horsepower = data.Power / 745.7;
+            const torqueFtLbs = data.Torque * 0.73756;
+            
+            if (!isNaN(horsepower)) {
+              setPeakHp(prev => Math.max(prev, horsepower));
+            }
+            if (!isNaN(torqueFtLbs)) {
+              setPeakTorque(prev => Math.max(prev, torqueFtLbs));
+            }
+
+            // Drivetrain layout mapping
+            const layouts = ['FWD', 'RWD', 'AWD'];
+            const layoutStr = layouts[data.DrivetrainType] || 'RWD';
+            if (layoutLockedRef.current) {
+              setDr(prev => {
+                if (prev.layout !== layoutStr) {
+                  return { ...prev, layout: layoutStr };
+                }
+                return prev;
+              });
+            }
+
+            // Dynamic mass estimation
+            const speedMS = data.Speed;
+            const accelZ = data.AccelerationZ;
+            const powerW = data.Power;
+            
+            if (data.Accel > 204 && data.Brake === 0 && speedMS > 10 && accelZ > 0.5 && powerW > 0) {
+              const massKg = powerW / (speedMS * accelZ);
+              const weightLbs = massKg * KG_TO_LB;
+              
+              setWeightEstimates(prev => {
+                const next = [...prev, weightLbs];
+                if (next.length > 80) {
+                  next.shift();
+                }
+                return next;
+              });
+            }
+          }
+        } catch (err) {
+          console.error("Failed to parse telemetry message", err);
+        }
+      };
+    } catch (e) {
+      console.error("EventSource initialization failed", e);
+      setTelemetryConnected('disconnected');
+    }
+
+    return () => {
+      if (es) es.close();
+    };
+  }, [telemetryConnected, telemetryUrl]);
+
+  // Reset peak values and weight estimates if car changes
+  const lastCarOrdinal = useRef(null);
+  useEffect(() => {
+    if (telemetryData && telemetryData.CarOrdinal !== lastCarOrdinal.current) {
+      lastCarOrdinal.current = telemetryData.CarOrdinal;
+      setPeakHp(0);
+      setPeakTorque(0);
+      setWeightEstimates([]);
+    }
+  }, [telemetryData]);
+
+  // Sync locked inputs to telemetry / database lookup
+  useEffect(() => {
+    if (!telemetryData || !telemetryData.IsRaceOn) return;
+
+    const dbCar = CAR_DATABASE[String(telemetryData.CarOrdinal)];
+    
+    // Front bias sync
+    if (frontBiasLocked && dbCar) {
+      setCh(prev => {
+        if (prev.frontBias !== dbCar.frontBias) {
+          return { ...prev, frontBias: dbCar.frontBias };
+        }
+        return prev;
+      });
+    }
+
+    // Layout sync
+    const layouts = ['FWD', 'RWD', 'AWD'];
+    const layoutStr = dbCar ? dbCar.layout : (layouts[telemetryData.DrivetrainType] || 'RWD');
+    if (layoutLocked) {
+      setDr(prev => {
+        if (prev.layout !== layoutStr) {
+          return { ...prev, layout: layoutStr };
+        }
+        return prev;
+      });
+    }
+
+    // Weight sync (Stock or Estimated)
+    if (weightLocked) {
+      let targetWeight = null;
+      if (weightEstimates.length >= 15) {
+        targetWeight = estimatedWeight;
+      } else if (dbCar) {
+        targetWeight = dbCar.weight;
+      }
+
+      if (targetWeight !== null && targetWeight > 0) {
+        setCh(prev => {
+          const diff = Math.abs(prev.weight - targetWeight);
+          if (diff > 1) {
+            return { ...prev, weight: Math.round(targetWeight) };
+          }
+          return prev;
+        });
+      }
+    }
+  }, [telemetryData, weightLocked, frontBiasLocked, layoutLocked, estimatedWeight, weightEstimates.length]);
   const bumpZoom=d=>setUiZoom(z=>parseFloat(Math.max(0.7,Math.min(1.6,z+d)).toFixed(2)));
   const[tutSeen,setTutSeen]=usePersist('suspos_tutorial_seen_v1',{beginner:false,intermediate:false,pro:false});
   const[balTutSeen,setBalTutSeen]=usePersist('suspos_baltut_seen_v1',false);
@@ -2078,7 +2303,7 @@ function App(){
     else if(stepMeta?.sidebar==='open')setSidebarOpen(true);
   },[tutMode,tutStep]); // eslint-disable-line
   const[loadMode,setLoadMode]=useState('all'); // 'all'=feel+drivetrain, 'fe'=feel only
-  const[open,setOpen]=useState({chassis:true,build:true,ride:true,dampers:true,arb:true,alignment:true,drivetrain:true,brakes:true,balanceExpanded:false,presetsOpen:false});
+  const[open,setOpen]=useState({telemetryOpen:false,chassis:true,build:true,ride:true,dampers:true,arb:true,alignment:true,drivetrain:true,brakes:true,balanceExpanded:false,presetsOpen:false});
   const[showChecker,setShowChecker]=useState(false);
   const[showResetModal,setShowResetModal]=useState(false);
   const[resetConfirmText,setResetConfirmText]=useState('');
@@ -2528,6 +2753,56 @@ function App(){
             </div>
           )}
 
+          {/* LIVE TELEMETRY panel */}
+          <div id="zone-telemetry">
+            <Sec title="LIVE TELEMETRY" open={open.telemetryOpen} onToggle={tog('telemetryOpen')}>
+              <div style={{marginBottom:12}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                  <span style={{fontSize:12,color:'#9ca3af'}}>Bridge URL</span>
+                  <div style={{display:'flex',alignItems:'center',gap:6}}>
+                    <span style={{width:8,height:8,borderRadius:'50%',background:telemetryConnected === 'connected' ? '#22c55e' : telemetryConnected === 'connecting' ? '#eab308' : '#ef4444'}}/>
+                    <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase'}}>{telemetryConnected}</span>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:6}}>
+                  <input 
+                    type="text" 
+                    value={telemetryUrl} 
+                    onChange={e=>setTelemetryUrl(e.target.value)}
+                    disabled={telemetryConnected!=='disconnected'}
+                    style={{
+                      flex:1,
+                      background:'#0a0f1a',
+                      border:'1px solid #1e293b',
+                      borderRadius:2,
+                      color:'#e2e8f0',
+                      fontFamily:'Courier New',
+                      fontSize:12,
+                      padding:'4px 6px',
+                      outline:'none'
+                    }}
+                  />
+                  <button 
+                    className={`tog${telemetryConnected!=='disconnected'?' on':''}`}
+                    onClick={handleTelemetryToggle}
+                    style={{padding:'4px 10px',fontSize:11,width:90}}
+                  >
+                    {telemetryConnected==='disconnected'?'CONNECT':'DISCONNECT'}
+                  </button>
+                </div>
+              </div>
+              <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:4}}>
+                <Stat label="Car" value={telemetryData ? (CAR_DATABASE[String(telemetryData.CarOrdinal)] ? CAR_DATABASE[String(telemetryData.CarOrdinal)].name : `ID: ${telemetryData.CarOrdinal}`) : '—'} unit=""/>
+                <Stat label="Layout" value={telemetryData ? (['FWD', 'RWD', 'AWD'][telemetryData.DrivetrainType] || '—') : '—'} unit=""/>
+                <Stat label="Speed" value={telemetryData ? (metricUnits ? `${Math.round((telemetryData.Speed / MPH_TO_MS) * KMH_PER_MPH)} km/h` : `${Math.round(telemetryData.Speed / MPH_TO_MS)} mph`) : '—'} unit=""/>
+                <Stat label="RPM" value={telemetryData ? `${Math.round(telemetryData.CurrentEngineRpm)} / ${Math.round(telemetryData.EngineMaxRpm)} rpm` : '—'} unit=""/>
+                <Stat label="Peak HP" value={peakHp > 0 ? `${Math.round(peakHp)} hp` : '—'} unit=""/>
+                <Stat label="Peak Torque" value={peakTorque > 0 ? (metricUnits ? `${Math.round(peakTorque / 0.73756)} N·m` : `${Math.round(peakTorque)} lb-ft`) : '—'} unit=""/>
+                <Stat label="Est. Weight" value={telemetryData ? (weightEstimates.length < 15 ? `Estimating (${weightEstimates.length}/15)...` : (metricUnits ? `${Math.round(estimatedWeight / KG_TO_LB)} kg` : `${Math.round(estimatedWeight)} lb`)) : '—'} unit=""/>
+              </div>
+            </Sec>
+          </div>
+
           {/* BEGINNER panel */}
           {uiMode==='beginner'&&(()=>{
             const stAgVal=Math.max(-50,Math.min(50,Math.round((70-(fe.reboundZeta??70))*2)));
@@ -2547,6 +2822,7 @@ function App(){
                 <div id="zone-layout-build" style={dim('layout-build')}>
                 <div style={{fontSize:10,color:'#94a3b8',letterSpacing:2,marginBottom:14}}>CHASSIS</div>
                 <Toggle label="Layout" value={dr.layout} onChange={pDr('layout')}
+                  locked={layoutLocked} onToggleLock={()=>setLayoutLocked(!layoutLocked)}
                   options={[{value:'FWD',label:'FWD'},{value:'RWD',label:'RWD'},{value:'AWD',label:'AWD'}]}/>
                 </div>
                 <div id="zone-build-type" style={dim('build-type')}>
@@ -2559,10 +2835,12 @@ function App(){
                   onChange={metricUnits?v=>pCh('weight')(v*KG_TO_LB):pCh('weight')}
                   min={metricUnits?45:100} max={metricUnits?8165:18000} step={1}
                   unit={metricUnits?'kg':'lb'} logScale={true} logMid={metricUnits?2722:6000}
-                  hint="Total vehicle weight. Find this on the car's stat page in Forza."/>
+                  hint="Total vehicle weight. Find this on the car's stat page in Forza."
+                  locked={weightLocked} onToggleLock={()=>setWeightLocked(!weightLocked)}/>
                 <Field label="Front Weight Bias" value={ch.frontBias} onChange={pCh('frontBias')}
                   min={30} max={70} step={1} unit="%"
-                  hint="Percentage of total weight on the front axle. Shown on the car selection screen. 50% = perfect balance."/>
+                  hint="Percentage of total weight on the front axle. Shown on the car selection screen. 50% = perfect balance."
+                  locked={frontBiasLocked} onToggleLock={()=>setFrontBiasLocked(!frontBiasLocked)}/>
                 </div>
 
                 <div id="zone-ride-stiffness" style={dim('ride-stiffness')}>
@@ -2632,9 +2910,11 @@ function App(){
               unit={metricUnits?'kg':'lb'} logScale={true} logMid={metricUnits?2722:6000}
               hint={metricUnits
                 ?"Total vehicle weight in kg. Find this on the car's stat page in Forza. Affects spring rates, damper forces, and ARB stiffness directly."
-                :"Total vehicle weight in pounds. Find this on the car's stat page in Forza. Affects spring rates, damper forces, and ARB stiffness directly."}/>
+                :"Total vehicle weight in pounds. Find this on the car's stat page in Forza. Affects spring rates, damper forces, and ARB stiffness directly."}
+              locked={weightLocked} onToggleLock={()=>setWeightLocked(!weightLocked)}/>
             <Field label="Front Weight Bias" value={ch.frontBias} onChange={pCh('frontBias')} min={30} max={70} step={1} unit="%"
-              hint="Percentage of total weight on the front axle. Shown on the car selection screen. 50% = perfect balance. Most front-engined cars are 52–58% front."/>
+              hint="Percentage of total weight on the front axle. Shown on the car selection screen. 50% = perfect balance. Most front-engined cars are 52–58% front."
+              locked={frontBiasLocked} onToggleLock={()=>setFrontBiasLocked(!frontBiasLocked)}/>
             {uiMode==='pro'&&<div style={{display:'flex',alignItems:'center',gap:6,
                          padding:'4px 8px',background:'#0a0f1a',borderRadius:2,
                          border:'1px solid #1e293b',marginBottom:10,marginTop:-4}}>
@@ -3405,7 +3685,8 @@ function App(){
               diffRearAccel:DEF_DR.diffRearAccel,
               diffRearDecel:DEF_DR.diffRearDecel,
               diffCenter:DEF_DR.diffCenter}))}>
-            <Toggle label="" value={dr.layout} onChange={pDr('layout')}
+            <Toggle label="Layout" value={dr.layout} onChange={pDr('layout')}
+              locked={layoutLocked} onToggleLock={()=>setLayoutLocked(!layoutLocked)}
               options={[{value:'FWD',label:'FWD'},{value:'RWD',label:'RWD'},{value:'AWD',label:'AWD'}]}/>
             {uiMode==='pro'&&<div style={{display:'flex',alignItems:'center',gap:6,marginTop:8,marginBottom:10,flexWrap:'wrap'}}>
               <span style={{fontSize:12,color:'#94a3b8'}}>Differential Mode</span>

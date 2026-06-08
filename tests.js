@@ -70,6 +70,22 @@ const solveDamp = (hz, mass, z, lim) => {
   return Math.min(lim, Math.max(1, cc * (z / 100) * DAMPING_CALIBRATION));
 };
 
+const getMedian = arr => {
+  if (arr.length === 0) return 0;
+  const sorted = [...arr].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+};
+
+const estimateWeight = (power, speed, accelZ, throttle, brake) => {
+  // throttle is range 0-255. >80% is >204
+  if (throttle > 204 && brake === 0 && speed > 10 && accelZ > 0.5) {
+    const massKg = power / (speed * accelZ);
+    return massKg * 2.204622622; // Convert to lbs
+  }
+  return null;
+};
+
 // ── test harness ──────────────────────────────────────────────────────────────
 
 let passed = 0, failed = 0;
@@ -263,6 +279,37 @@ console.log('\nmechBalanceLLT');
   const natRs = (cornerMassesM(ch).rear * ch.trackR ** 2) /
                 (cornerMassesM(ch).front * ch.trackF ** 2 + cornerMassesM(ch).rear * ch.trackR ** 2);
   assert('default car natural balance ≈ 0.47', balanceFromRsBal(ch, natRs), 0.469, 0.02);
+}
+
+// ── telemetry logic: getMedian and estimateWeight ────────────────────────────
+
+console.log('\ntelemetry logic: getMedian');
+{
+  assertEq('median of odd-length array (unsorted)', getMedian([3, 1, 2]), 2);
+  assertEq('median of even-length array (unsorted)', getMedian([4, 1, 3, 2]), 2.5);
+  assertEq('median of empty array', getMedian([]), 0);
+  assertEq('median of single item', getMedian([42]), 42);
+}
+
+console.log('\ntelemetry logic: estimateWeight');
+{
+  // Valid acceleration conditions: Power = 300,000 W, Speed = 20 m/s, AccelZ = 5.0 m/s², throttle = 255, brake = 0
+  // massKg = 300000 / (20 * 5) = 3000 kg
+  // weightLbs = 3000 * 2.204622622 = 6613.867866 lbs
+  const expectedWeight = 3000 * KG_TO_LB;
+  assert('valid weight estimation', estimateWeight(300000, 20, 5.0, 255, 0), expectedWeight, 0.0001);
+
+  // throttle too low: throttle = 150
+  assertEq('no weight estimation when throttle is too low', estimateWeight(300000, 20, 5.0, 150, 0), null);
+
+  // braking is active: brake = 50
+  assertEq('no weight estimation when braking', estimateWeight(300000, 20, 5.0, 255, 50), null);
+
+  // speed is too low: speed = 5
+  assertEq('no weight estimation when speed is too low', estimateWeight(300000, 5, 5.0, 255, 0), null);
+
+  // acceleration is too low: accelZ = 0.2
+  assertEq('no weight estimation when acceleration is too low', estimateWeight(300000, 20, 0.2, 255, 0), null);
 }
 
 // ── summary ───────────────────────────────────────────────────────────────────
