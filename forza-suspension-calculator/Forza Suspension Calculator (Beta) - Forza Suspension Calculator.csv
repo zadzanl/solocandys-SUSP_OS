@@ -1,0 +1,17 @@
+,Input,,,Output,,,Input,,,Output,,,,,Reference and Key
+,,,,,,,,,,,,,,,
+,Imperial,,,Springs,,,Imperial,,,Springs,,,Please make a copy to your Drive for extended use.,,"M = Mass, kg"
+,lbs,"2,204",,Front lb/in,,,lbs,"2,204",,Front Hz,,,,,"K = Spring, n/m"
+,Front,51%,,359.2,,,Front,51%,,2.50,,,"    Damping ratio calculations (ζ) are made under the assumption Forza's damping units are n/mm/s. It's likely this is incorrect, and possible that Forza uses coefficient scaling by weight, and/or scaling brackets by weight and/or class. ",,"F = Natural frequency, Hz"
+,Front Hz,2.50,,Rear lb/in,,,F lbf/in,359,,Rear Hz,,,,,K = (F*2π)² x M
+,Rear Hz,2.45,,331.4,,,R lbf/in,331,,2.45,,,,,F = √(K/M) / 2π
+,Antiroll Bars,,,Antiroll Bars,,,Antiroll Bars,,,Antiroll Bars,,,,,
+,Total (%),100%,,Front,23.90,,Front,23.9,,Rear ARB Ratio,,,Suggested values:,,c  = Damping coefficient
+,Rear (%),90%,,Rear,20.70,,Rear,20.7,,90.1%,,,,,c꜀ = Critical damping coefficient
+,Rebound ζ,,,Rebound,,,Rebound,,,Rebound ζ,,,"ζ: In most cases, no less than 50% bump, no more than 80% rebound. 55% bump, 65% rebound is a safe starting point.",,ζ  = Damping ratio
+,Front,65%,,Front,5.2,,Front,7.1,,Front,88%,,,,c꜀ = 2√KM
+,Rear,65%,,Rear,4.9,,Rear,6.6,,Rear,88%,,,,ζ  = c/c꜀
+,Bump ζ,,,Bump,,,Bump,,,Bump ζ,,,"Hz: 2.0-3.0Hz for road cars, below 2.0Hz for some rally cars and offroad (Horizon), above 3.0Hz for some race cars.",,
+,Front,55%,,Front,4.4,,Front,6.0,,Front,75%,,,,1kg = 2.204622622 lbs
+,Rear,55%,,Rear,4.1,,Rear,5.6,,Rear,55%,,,,1lbf/in = 175.126790921 n/m
+,,Tuning,,,,,,Tune Check,,,,,,,1kgf/m = 980.6645 n/m

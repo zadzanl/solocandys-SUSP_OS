@@ -2,3 +2,8 @@
 .claude/settings.local.json
 GEMINI.md
 CLAUDE.md
+
+# Openspec
+.agent/
+.claude/
+.github/

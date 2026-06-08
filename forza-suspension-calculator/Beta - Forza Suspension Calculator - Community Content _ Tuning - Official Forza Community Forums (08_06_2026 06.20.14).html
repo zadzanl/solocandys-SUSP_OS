@@ -1,0 +1,95 @@
+Today, I was compelled to revise a “Compact” iteration of my Ride Frequency spreadsheet, with damper tuning by damping ratio, under the assumption Forza’s damping units are n/mm/s coefficient, and release it as a fresh sheet.
+
+Features:
+
+- Imperial/Metric switch
+- Spring tuning by ride frequency/natural frequency in **Hz**
+- Basic front/rear anti-roll bar balancing, with global and relative rear % multipliers, and scaling by weight (I am still considering how to improve this)
+- Damper tuning by damping ratio, **ζ**
+
+The input fields should be open for public edit. Please *File>Make a copy* to save a copy to your Google drive for extended use.
+
+[docs.google.com](https://docs.google.com/spreadsheets/d/1ySrVkgQpohIduhdLCwe99p3d6KmWXKgck5Uk-qDOlPw/edit#gid=1084723816)### [Forza Suspension Calculator (Beta)](https://docs.google.com/spreadsheets/d/1ySrVkgQpohIduhdLCwe99p3d6KmWXKgck5Uk-qDOlPw/edit#gid=1084723816) [local copy]()
+
+Forza Suspension Calculator Input,Output,Input,Output,Reference and Key Imperial,Springs,Imperial,Springs,Please make a copy to your Drive for extended use.,M = Mass, kg lbs,2,204,Front lb/in,lbs,2,204,Front Hz,K = Spring,...
+
+Constructive feedback is welcome.
+
+---
+
+## Comments
+
+> **Mr\_Pinstripes** · [2020-08-22](https://forums.forza.net/t/beta-forza-suspension-calculator/97135/2)
+> 
+> Great stuff, as always. I’m in the process of overhauling a bunch of my builds, so I’ll do some parallel testing and see if I can’t come up with anything useful for you.
+> 
+> First impression: Damping ratios of 65%/55% seem a bit conservative.
+> 
+> Currently working on a Lotus Cortina. Car weighs 1,699 lbs/51% front weight distribution. Springs are at 2.7Hz /2.72Hz F/R, ride height at 6.7"/6.9" F/R. That’s pretty well sorted; suspension travel stays fairly equal between front and rear, uses pretty much its full range of motion, and the body doesn’t pitch over bumps.
+> 
+> With that foundation and the damper ratio set at 65%R/55%B, the calculator returns settings of R=4.3/4.2 and B=3.7/3.5. At those, body motion is still pretty wild. The car doesn’t settle quickly after bumps, and an undulating surface (Rio is a good example) gets downright bouncy. Raising the ratios up to 85%R/65%B returns settings of R=5.7/5.5 and B=4.3/4.2, which seem to work a lot better. Still a little bouncier than my hand-set settings (currently at R=8.0/7.0, B=5.0/5.5) on Rio, but not uncontrollable by any means.
+> 
+> Not sure if 85%/65% is still within a reasonable range, and I’m positive that the ~115%/80% my hand settings work out to be is way off, but both seem to work better in game than 65%/55%.
+> 
+> I’ll add more feedback as I get more testing done, but it’ll be a slow process. It’s been taking me about two weeks to work through one build.
+> 
+> \==
+> 
+> Edit to add:
+> 
+> Looks like most of my revised setups are using damping ratios somewhere in the neighborhood of 100%R/70%B. The two that aren’t are both closer to the recommended settings.
+
+> **NumberlessMath** · [2020-08-22](https://forums.forza.net/t/beta-forza-suspension-calculator/97135/3) · 1 likes
+> 
+> ![](https://sea2.discourse-cdn.com/forza/user_avatar/forums.forza.net/mr_pinstripes/48/613_2.png) Mr\_Pinstripes:
+> 
+> > 
+> > Great stuff, as always. I’m in the process of overhauling a bunch of my builds, so I’ll do some parallel testing and see if I can’t come up with anything useful for you.
+> > 
+> > First impression: Damping ratios of 65%/55% seem a bit conservative.
+> > 
+> > Currently working on a Lotus Cortina. Car weighs 1,699 lbs/51% front weight distribution. Springs are at 2.7Hz /2.72Hz F/R, ride height at 6.7"/6.9" F/R. That’s pretty well sorted; suspension travel stays fairly equal between front and rear, uses pretty much its full range of motion, and the body doesn’t pitch over bumps.
+> > 
+> > With that foundation and the damper ratio set at 65%R/55%B, the calculator returns settings of R=4.3/4.2 and B=3.7/3.5. At those, body motion is still pretty wild. The car doesn’t settle quickly after bumps, and an undulating surface (Rio is a good example) gets downright bouncy. Raising the ratios up to 85%R/65%B returns settings of R=5.7/5.5 and B=4.3/4.2, which seem to work a lot better. Still a little bouncier than my hand-set settings (currently at R=8.0/7.0, B=5.0/5.5) on Rio, but not uncontrollable by any means.
+> > 
+> > Not sure if 85%/65% is still within a reasonable range, and I’m positive that the ~115%/80% my hand settings work out to be is way off, but both seem to work better in game than 65%/55%.
+> > 
+> > I’ll add more feedback as I get more testing done, but it’ll be a slow process. It’s been taking me about two weeks to work through one build.
+> > 
+> > \==
+> > 
+> > Edit to add:
+> > 
+> > Looks like most of my revised setups are using damping ratios somewhere in the neighborhood of 100%R/70%B. The two that aren’t are both closer to the recommended settings.
+> 
+> Hey, glad to see you’re enjoying Forza and tuning still.
+> 
+> “Parallel testing”, about that… I developed carpal tunnel playing manual w/clutch over a year ago. I still can’t play for long without pain. Forza hasn’t been installed on this machine since I ran a “windows 10 debloater” script from GitHub that broke the Xbox app. Since then I’ve reformatted and reinstalled Windows to fix a mysterious issue with .jar apps failing to launch. Could reinstall it, but my wrist…
+> 
+> Anyway, I have 2 theories about the disparity you’ve observed:  
+> 1: Forza units are lbf/ft/s, ergo, the calculator’s outputs are 73.7% of actual  
+> 2: Forza units are 1:1 n/mm/s at 1000kg, and scale linearly with weight. The output for the Cortina, at 770kg, is 77% of actual. I think this is less likely, unless all but the 2 cars you mentioned which are closer to 65%/55% are near or below 800kg.
+> 
+> I’ve updated the calculator under the former assumption. I’m working on making an inverse version now, to input Forza tuning values and output the frequencies and ratios. If you have any cars well over 1000kg, to check for ζ and rule out the 2nd theory above, I would be grateful. The tune check page will be added to the sheet when it’s finished. Thanks for sharing your insights.
+
+> **Fifty\_Inch** · [2020-08-22](https://forums.forza.net/t/beta-forza-suspension-calculator/97135/4) · 1 likes
+> 
+> For normal street cars like the Lotus Cortina rebound 7-8 and Bunp 4-5 usually does the job. Rebound around 4 is certainly too low.
+> 
+> Try 7.8/7.2 and 4.4/4.0 for the Cortina.
+
+> **Mr\_Pinstripes** · [2020-08-23](https://forums.forza.net/t/beta-forza-suspension-calculator/97135/5)
+> 
+> Of the two I mentioned, one (a Porsche 930) is at 1260kg, 40% front, 3.14/3.15Hz frequencies F/R. My hand-set damping ratios for that one worked out to around 65%R/40%B. It’s currently the heaviest car I have finished. The other’s a MGA at 966kg, 52% front, 2.7/2.74Hz F/R. Damping ratios for that are around 70%R/30%B. I do have an Aston Martin that I’ve named “Heckin’ Chonker” on my cars-to-tune list, which should qualify handily for “well over 1000kg”. I think it’s pushing 2000kg, but can’t remember offhand. I wrapped up the setup on the Lotus tonight, so tomorrow morning I’ll try to get the Aston far enough into the tuning process to start roughing in the dampers. If not, it’ll be two weeks before I get a chance to play again.
+
+> **NumberlessMath** · [2020-08-23](https://forums.forza.net/t/beta-forza-suspension-calculator/97135/6)
+> 
+> I put those numbers into the old calc for Forza units, then those into the new one. It says 48/30 for the Porsche, 53/22 for the MGA. That’s far softer than The Cortina at 4.3-3.5-ish which was 48/41. adding weight scaling around 1000kg center for lbf/ft/s units (I usually use imperial btw) would put the Porsche at 60/38, MGA at 55/23 and Cortina at 37/32, soft in rebound but stiffer in bump than the MGA.
+> 
+> I’ll try to load up Horizon soon and check some setups, take notes, then go to 7, maybe with my wheel, and try tuning a variety of cars. Storage space and download bandwidth are at a premium right now.
+> 
+> Edit: I lost my initial post by changing tab accidentally. I meant to say, in all, I’m not confident at this point. Without insider info, an accurate Forza calculator functionally similar to the Project Cars 2 Suspension Calculator will likely remain out of reach.
+
+> **NumberlessMath** · [2020-08-24](https://forums.forza.net/t/beta-forza-suspension-calculator/97135/7)
+> 
+> The calculator and it’s inverse have been reverted to n/mm/s output. Useful patterns may appear among tuned vehicles or groups of vehicles in individual player’s garages.

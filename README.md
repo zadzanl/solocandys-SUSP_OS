@@ -3,6 +3,8 @@
 A single-file suspension tuning calculator for **Forza Horizon** and **Forza Motorsport**. Enter your car's physical stats and a handling target — SUSP.OS outputs exact in-game click values for springs, dampers, anti-roll bars, alignment, brakes, and differential, all grounded in real suspension physics.
 
 > Physics approach based on [NumberlessMath's Forza Suspension Calculator (2020)](https://forums.forza.net/t/beta-forza-suspension-calculator/97135)
+>
+> For the spec-level formula inventory, provenance notes, and change history, see `openspec/specs/`.
 
 ---
 
@@ -207,6 +209,7 @@ Key empirical constants calibrated from real Forza data:
 | `TIRE_LOAD_SENS` | 0.15 | Grip falloff per unit Fz/Fz_ref — the tyre load sensitivity that lets roll stiffness shift balance |
 | `TIRE_MECH_SCALE` | 0.08 | Tyre width rear/front ratio → mech balance offset via `0.08 × ln(twR/twF)`. Forza's displayed mech balance incorporates tyre width asymmetry; this correction ensures the calculator's output matches Forza's reading. Calibrated from Stage 2 testing (same suspension, tyre widths swapped) across MX-5, Ultima, and Scirocco |
 | `MECH_BAL_GAIN` | 1.8 | Axle grip-capacity delta → balance offset (calibrated to the 0.5-neutral scale) |
+| `MECH_BALANCE_TARGET` | 0.65 | Default handling target used by MECH, CO-SOLVE, MECH rear-Hz mode, and related guidance before user adjustment |
 | `WIDTH_GRIP_EXP` | 0.4 | Tyre width → grip capacity, sub-linear exponent |
 | `DIFF_BIAS_SCALE` | 0.14 | Diff lock % → handling bias contribution |
 | `BRAKE_BIAS_SCALE` | 0.20 | Brake balance deviation → handling bias contribution |
@@ -266,6 +269,7 @@ node tests.js   # run physics unit tests
 ## Credits
 
 - Physics foundation: [NumberlessMath](https://forums.forza.net/t/beta-forza-suspension-calculator/97135) (2020)
+- Local reference exports: `forza-suspension-calculator/Forza Suspension Calculator (Beta) - Forza Suspension Calculator.csv` and `forza-suspension-calculator/Beta - Forza Suspension Calculator - Community Content _ Tuning - Official Forza Community Forums (08_06_2026 06.20.14).html`
 - Mechanical balance calibration: Forza early access data (4-point LC 500 dataset)
 
 ---

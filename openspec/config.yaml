@@ -1,0 +1,9 @@
+schema: spec-driven
+
+context: |
+  Tech stack: Single-file index.html, React 18 UMD + Babel standalone, CSS/JS inline (no bundler).
+  Domain: Forza Horizon / Motorsport suspension and tuning calculator.
+  Storage/state: Imperial canonical values internally; metric display/input conversion available.
+    Six persistent save slots in localStorage with car-aware ride-stiffness scaling.
+  Testing: `node tests.js` (44 checks, no build step).
+  Doc convention: Specs describe the shipped baseline; future changes should be OpenSpec deltas.
