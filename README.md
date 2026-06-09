@@ -229,8 +229,85 @@ To run the telemetry bridge:
 3. Open `index.html` in your browser.
 4. Expand the **LIVE TELEMETRY** panel in the sidebar, verify the URL is set to `http://localhost:5601/telemetry`, and click **CONNECT**. The indicator will turn green once it connects to the bridge.
 
+### Bounded Capture & Review Workflow
+
+Rather than continuously syncing telemetry to the calculator inputs (which could overwrite manual configurations or capture noisy transient values), SUSP.OS uses a **Bounded Capture & Review Workflow**:
+
+1. **Auto-Start**: When connected to the bridge, a capture window starts automatically as soon as a race session begins (`IsRaceOn === true`), provided no snapshot is currently pending or applied.
+2. **Manual Controls**: You can click **▶ CAPTURE** or **↻ RECAPTURE** in the telemetry panel to manually trigger a new capture window, or **✕ CANCEL CAPTURE** to cancel an active capture.
+3. **Capture Window**: The app records telemetry for a short bounded window of up to 8 seconds of active driving. If it collects a target of 80 valid weight samples early, the capture automatically stops to finalize the snapshot.
+4. **Cancellation**: Cancelling an active capture aborts the sampling run and immediately discards all collected samples and peak values without generating a snapshot.
+5. **Snapshot Review**: Once the capture completes, the collected parameters are presented in the **REVIEW SNAPSHOT** panel:
+   - Candidates include **Car Name**, **Drivetrain Layout**, **Weight**, **Front Weight Bias**, **Max RPM**, **Peak Power**, **Peak Torque**, and **Peak Speed**.
+   - Each candidate displays its source classification (e.g., `lookup`, `parsed`, `estimated`) and a confidence rating (`high`, `medium`, `low`).
+6. **Selective Apply**: Users can toggle checkboxes next to each candidate. Deselected candidates are greyed out. Clicking **APPLY SELECTED** applies only the checked values to the calculator inputs once, leaving unchecked fields untouched.
+7. **Manual Overrides**: If you manually change `Weight`, `Front Weight Bias`, or `Drivetrain Layout` in the sidebar after applying a snapshot, the metadata source for that input automatically updates to `'manual'` to correctly reflect that it has been manually overridden.
+8. **Restored State**: On application startup, any previously applied telemetry-derived inputs are mapped to a `'restored'` state to distinguish them from active, live-connected telemetry sources.
+
+### Dynamic Weight Estimation
+
+Because Forza does not output the car's current upgraded weight in the telemetry stream, SUSP.OS estimates it dynamically using Newtonian physics from active driving telemetry:
+
+$$\text{Mass (kg)} = \frac{\text{Power (Watts)}}{\text{Velocity (m/s)} \times \text{Longitudinal Acceleration (m/s}^2\text{)}}$$
+
+To ensure accuracy and filter out noise (such as tyre slip, gear shifts, or elevation changes), the calculation is strictly constrained:
+- **Active Accel**: Throttle must be $> 80\%$ (or `throttle > 204`) and brake must be completely off (`brake === 0`).
+- **Speed & Accel Thresholds**: Speed must be $> 10\text{ m/s}$ (approx. $22\text{ mph}$) and longitudinal acceleration must be $> 0.5\text{ m/s}^2$ to avoid divisions by zero.
+- **Median Filtering**: Calculated mass samples are pushed into a sliding window queue (maximum 80 samples). The live estimated weight shown in the UI is the filtered median of these samples, requiring at least 8 valid samples to produce a confident estimation.
+
+### Status & Diagnostics
+
+SUSP.OS provides detailed status indicators and diagnostics for the telemetry connection and packet flow.
+
+#### Connection Status (Bridge State)
+- **Disconnected**: The application is not connected to the `forza-bridge.js` backend server.
+- **Connecting**: The frontend is attempting to open a Server-Sent Events (SSE) connection with the bridge.
+- **Connected**: A SSE channel is active and listening for telemetry data.
+
+#### Packet Status (UDP Stream State)
+- **Idle**: Default state when disconnected, or when connection is established but no packets have arrived.
+- **Waiting / Waiting for driving packets**: Connected to the bridge, but no telemetry packets have been received yet. Forza only streams UDP packets when you are actively driving in a race session.
+- **Receiving**: UDP telemetry packets are actively flowing from the game through the bridge to the frontend.
+- **Stale**: Packets have stopped arriving for more than 4 seconds. This is normal when the game is paused, in menus, or on a loading screen.
+
+#### Capture Status (Telemetry Capture State)
+- **Inactive**: No capture is running or pending.
+- **Active / Sampling**: Telemetry capture is running. The UI displays the count of weight samples collected.
+- **Complete**: The capture window finished successfully, and a review snapshot has been generated.
+- **Insufficient**: The capture window closed, but less than 8 valid weight samples were collected. The snapshot cannot confidently estimate weight.
+- **Cancelled**: The capture was manually aborted, discarding all collected data.
+
+#### Diagnostics Block
+When connected and receiving supported packets, the diagnostics panel displays:
+- **Count**: Total number of telemetry packets received in the current session.
+- **Rate**: Live packet frequency in Hertz (Hz), calculated dynamically using a rolling window of the last 20 packet timestamps.
+- **Length**: Binary size of the UDP packet in bytes (e.g., 232 B, 311 B, 324 B).
+- **Format**: Detected game profile (e.g., `Horizon v1`, `Horizon v2`, `Motorsport Sled`, `Motorsport v1`) parsed from packet length.
+
+It also displays real-time values for current engine **RPM**, **Speed** (mph/km/h), **Power** (hp), and **Car Ordinal** from the last received packet.
+
+### Data Out Limitations
+
+Forza's Data Out UDP stream was designed primarily for motion rigs and dashboard displays, which imposes several limitations on tuning calculator integration:
+
+1. **Driving-Only Stream**: Telemetry packets are only emitted during live gameplay. Pausing the game, navigating menus, or browsing the garage stops the stream immediately (causing the packet status to go **Stale**).
+2. **Missing Metadata and Setup Values**: The telemetry stream does *not* output static car details or setup parameters. Specifically, the following fields are completely missing:
+   - Upgraded vehicle weight
+   - Front weight bias %
+   - Installed upgrades or tuning modifications
+   - In-game tuning menu clicks (springs, dampers, ARBs, alignment, brakes, diff)
+3. **How SUSP.OS Resolves Missing Data**:
+   - **Drivetrain Layout**: Instantly parsed from the telemetry `DrivetrainType` index (mapping to FWD, RWD, AWD).
+   - **Stock Weight & Bias**: Resolved via local database lookup based on the unique `CarOrdinal` transmitted by the game. If the car is stock, this fills the weight and front bias.
+   - **Upgraded Weight**: If the car is modified, SUSP.OS dynamically estimates the upgraded weight using Newtonian acceleration physics (described above) during a bounded driving window.
+   - **Manual Tuning Input**: Since actual tuning menu clicks (springs, dampers, ARBs, alignment, etc.) are never emitted, they must be manually entered into the calculator or solved using the built-in physics solvers.
+
+### Troubleshooting
+
+If you do not see packet flow, check the following:
+
 > [!NOTE]
-> **Windows AppContainer Loopback Workaround (PC Microsoft Store / Game Pass users)**:
+> **Windows AppContainer Loopback Exemption (PC Microsoft Store / Game Pass users)**:
 > Windows sandboxes UWP apps, which prevents Microsoft Store/Game Pass versions of Forza from sending UDP traffic to localhost (`127.0.0.1`). If you are running the game and bridge on the same PC, you must enable loopback exemption.
 > - **Option A**: Use a GUI utility like the **AppContainer Loopback Exemption Utility** and check the box for Forza.
 > - **Option B**: Open Command Prompt as an Administrator and execute:
@@ -239,24 +316,9 @@ To run the telemetry bridge:
 >   ```
 >   *(Use `Microsoft.624F8B84B80_8wekyb3d8bbwe` for Forza Horizon 5, `Microsoft.ForzaMotorsport_8wekyb3d8bbwe` for Forza Motorsport, or `Microsoft.SunriseBaseGame_8wekyb3d8bbwe` for Forza Horizon 4).*
 
-### Input Synchronization & Lock Badges (🔒/🔓)
-
-Beside the **Weight**, **Front Weight Bias**, and **Drivetrain Layout** inputs, you will see a lock badge:
-- **Locked (🔒)**: When connected to live telemetry, these inputs will automatically synchronize with incoming data.
-  - **Drivetrain Layout**: Instantly set to FWD, RWD, or AWD based on the active car.
-  - **Weight & Bias**: If the game transmits a recognized `CarOrdinal`, SUSP.OS performs a lookup in its local database (`CAR_DATABASE`) and automatically fills in the stock weight and front bias.
-  - **Dynamic Weight Estimation**: If the car has aftermarket upgrades that alter its weight, SUSP.OS will dynamically calculate the new weight while you drive (see details below).
-- **Unlocked (🔓)**: Click the lock icon to toggle it. When unlocked, you can manually override and edit these values. Telemetry updates will be ignored for these inputs.
-
-### Dynamic Weight Estimation
-
-Because Forza does not output the car's current upgraded weight in the telemetry stream, SUSP.OS estimates it dynamically using Newtonian physics from active driving telemetry:
-$$\text{Mass (kg)} = \frac{\text{Power (Watts)}}{\text{Velocity (m/s)} \times \text{Longitudinal Acceleration (m/s}^2\text{)}}$$
-
-To ensure accuracy and filter out noise (such as tyre slip, gear shifts, or elevation changes), the calculation is strictly constrained:
-- **Active Accel**: Throttle must be $> 80\%$ (`throttle > 204`) and brake must be completely off (`brake === 0`).
-- **Speed & Accel Thresholds**: Speed must be $> 10\text{ m/s}$ (approx. $22\text{ mph}$) and longitudinal acceleration must be $> 0.5\text{ m/s}^2$ to avoid divisions by zero.
-- **Median Filtering**: Calculated mass samples are pushed into a sliding window queue (size 80). The live estimated weight shown in the UI is the filtered median of these samples, requiring at least 15 valid samples to begin displaying.
+- **Stale Packet Status**: If the status says **Stale**, it means the game is currently paused, in menus, on a loading screen, or has disconnected. Try driving in a race session; telemetry should resume immediately.
+- **HUD Settings**: Double-check that **Data Out** is set to `ON`, the IP Address is set to `127.0.0.1`, and the Port is set to `5600` in the game's **HUD and Gameplay** settings.
+- **Bridge Port Conflict**: If the bridge cannot start, verify that port `5600` (UDP) and port `5601` (TCP) are not occupied by other applications on your PC.
 
 ---
 

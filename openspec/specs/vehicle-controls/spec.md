@@ -4,7 +4,7 @@
 Manages build type, drivetrain layout, alignment, differential, brake, and game-mode controls that adapt solver recommendations and output limits.
 ## Requirements
 ### Requirement: Build type and drivetrain layout
-The system MUST let the user select build type and drivetrain layout and MUST use those selections to adjust alignment, differential, brake, and balance guidance, allowing these inputs to be overridden or auto-populated by live telemetry.
+The system MUST let the user select build type and drivetrain layout and MUST use those selections to adjust alignment, differential, brake, and balance guidance. Telemetry capture snapshots MAY provide candidate values, but calculator inputs MUST only change when the user explicitly applies a snapshot or edits fields manually.
 
 #### Scenario: Select build type
 - **WHEN** the user selects STREET, TRACK, or DRIFT
@@ -14,13 +14,17 @@ The system MUST let the user select build type and drivetrain layout and MUST us
 - **WHEN** the user selects FWD, RWD, or AWD
 - **THEN** differential controls and handling-balance contribution labels adapt to that layout
 
-#### Scenario: Override drivetrain layout with telemetry
-- **WHEN** drivetrain layout is auto-detected and pushed via telemetry and the field is locked/synced
-- **THEN** the UI updates the selected layout accordingly and adapts differential controls and handling-balance contribution labels
+#### Scenario: Apply captured drivetrain layout
+- **WHEN** a telemetry capture snapshot includes a drivetrain layout candidate and the user explicitly applies it
+- **THEN** the UI updates the selected layout once and adapts differential controls and handling-balance contribution labels
 
 #### Scenario: Decouple inputs from telemetry manual override
-- **WHEN** the user unlocks/decouples a telemetry-synced input field (such as drivetrain layout, weight, front weight bias, power, or max RPM)
-- **THEN** the input accepts manual user input and ignores future telemetry updates for that field
+- **WHEN** the user manually edits a capture-assisted input field such as drivetrain layout, weight, front weight bias, power, or max RPM
+- **THEN** the input accepts the manual user value and ignores future telemetry packets until the user explicitly captures and applies a new snapshot for that field
+
+#### Scenario: No continuous vehicle-control mutation
+- **WHEN** telemetry packets continue arriving after a snapshot has been applied or dismissed
+- **THEN** build type, drivetrain layout, weight, front bias, power, and max RPM remain unchanged unless the user edits them manually or applies a new snapshot
 
 ### Requirement: Alignment recommendations
 The system MUST provide automatic camber, toe, and caster recommendations from build type, layout, chassis geometry, solved roll angle, spring frequencies, and front weight bias, with manual override available.

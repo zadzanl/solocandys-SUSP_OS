@@ -2076,100 +2076,355 @@ function App(){
   const[saves,setSaves]=usePersist('suspos_saves_v9',PRESET_SAVES);
   const[uiMode,setUiMode]=usePersist('suspos_uimode_v1','beginner');
   const[uiZoom,setUiZoom]=usePersist('suspos_zoom_v1',1.1);
+  const[fieldSources,setFieldSources]=usePersist('suspos_sources_v1',{}); // {field: {source,confidence,appliedAt}}
 
-  const[telemetryConnected,setTelemetryConnected]=useState('disconnected');
-  const[telemetryData,setTelemetryData]=useState(null);
+  // Startup restored mapping
+  useEffect(() => {
+    setFieldSources(prev => {
+      let changed = false;
+      const next = { ...prev };
+      Object.keys(next).forEach(k => {
+        const entry = next[k];
+        if (entry && ['parsed', 'lookup', 'estimated'].includes(entry.source)) {
+          next[k] = { ...entry, source: 'restored' };
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, []);
+
+  // ── Telemetry state model ──────────────────────────────────────────────────
+  // Bridge: transport connection status
+  const[bridgeStatus,setBridgeStatus]=useState('disconnected'); // disconnected|connecting|connected
+  // Packet: UDP data availability (separate from bridge)
+  const[packetStatus,setPacketStatus]=useState('idle'); // idle|waiting|receiving|stale
   const[telemetryUrl,setTelemetryUrl]=useState('http://localhost:5601/telemetry');
-  const[peakHp,setPeakHp]=useState(0);
-  const[peakTorque,setPeakTorque]=useState(0);
-  const[weightLocked,setWeightLocked]=useState(true);
-  const[frontBiasLocked,setFrontBiasLocked]=useState(true);
-  const[layoutLocked,setLayoutLocked]=useState(true);
-  const[weightEstimates,setWeightEstimates]=useState([]);
+  const[lastPacket,setLastPacket]=useState(null);       // most recent parsed packet
+  const lastPacketRef=useRef(null);
+  useLayoutEffect(()=>{lastPacketRef.current=lastPacket;},[lastPacket]);
+  // Packet diagnostics
+  const[packetDiag,setPacketDiag]=useState({count:0,lastAt:null,format:null,warning:null,staleCount:0,rate:0,packetLength:null});
+  const packetTimestampsRef = useRef([]);
+  // Capture state
+  const[captureStatus,setCaptureStatus]=useState('inactive'); // inactive|active|complete|insufficient|cancelled
+  const[captureSamples,setCaptureSamples]=useState([]);       // weight estimation samples
+  const[capturePeakHp,setCapturePeakHp]=useState(0);
+  const[capturePeakTorque,setCapturePeakTorque]=useState(0);
+  const[captureCarOrdinal,setCaptureCarOrdinal]=useState(null);
+  const[captureMaxRpm,setCaptureMaxRpm]=useState(0);
+  const[capturePeakSpeed,setCapturePeakSpeed]=useState(0);
+  const[selectedCandidates,setSelectedCandidates]=useState({});
+  // Refs for capture state (avoids stale closures in setTimeout)
+  const capturePeakHpRef=useRef(0);
+  const capturePeakTorqueRef=useRef(0);
+  const captureMaxRpmRef=useRef(0);
+  const captureCarOrdinalRef=useRef(null);
+  const capturePeakSpeedRef=useRef(0);
+  useLayoutEffect(()=>{capturePeakHpRef.current=capturePeakHp;},[capturePeakHp]);
+  useLayoutEffect(()=>{capturePeakTorqueRef.current=capturePeakTorque;},[capturePeakTorque]);
+  useLayoutEffect(()=>{captureMaxRpmRef.current=captureMaxRpm;},[captureMaxRpm]);
+  useLayoutEffect(()=>{captureCarOrdinalRef.current=captureCarOrdinal;},[captureCarOrdinal]);
+  useLayoutEffect(()=>{capturePeakSpeedRef.current=capturePeakSpeed;},[capturePeakSpeed]);
+  // Snapshot state
+  const[pendingSnapshot,setPendingSnapshot]=useState(null);   // {candidates, capturedAt, carOrdinal}
+  const pendingSnapshotRef=useRef(null);
+  useLayoutEffect(()=>{pendingSnapshotRef.current=pendingSnapshot;},[pendingSnapshot]);
+  const[appliedSnapshot,setAppliedSnapshot]=useState(null);   // {values, sources, appliedAt}
+  const appliedSnapshotRef=useRef(null);
+  useLayoutEffect(()=>{appliedSnapshotRef.current=appliedSnapshot;},[appliedSnapshot]);
 
-  const weightLockedRef = useRef(weightLocked);
-  const frontBiasLockedRef = useRef(frontBiasLocked);
-  const layoutLockedRef = useRef(layoutLocked);
-  const metricUnitsRef = useRef(metricUnits);
-
-  useLayoutEffect(() => { weightLockedRef.current = weightLocked; }, [weightLocked]);
-  useLayoutEffect(() => { frontBiasLockedRef.current = frontBiasLocked; }, [frontBiasLocked]);
-  useLayoutEffect(() => { layoutLockedRef.current = layoutLocked; }, [layoutLocked]);
-  useLayoutEffect(() => { metricUnitsRef.current = metricUnits; }, [metricUnits]);
-
-  const estimatedWeight = useMemo(() => getMedian(weightEstimates), [weightEstimates]);
+  // Initialize selectedCandidates when pendingSnapshot changes
+  useEffect(() => {
+    if (pendingSnapshot) {
+      const initial = {};
+      pendingSnapshot.candidates.forEach(c => {
+        initial[c.field] = c.value != null && c.source !== 'unavailable';
+      });
+      setSelectedCandidates(initial);
+    } else {
+      setSelectedCandidates({});
+    }
+  }, [pendingSnapshot]);
+  // Refs for capture timing
+  const captureTimerRef=useRef(null);
+  const staleTimerRef=useRef(null);
+  const captureSamplesRef=useRef(captureSamples);
+  useLayoutEffect(()=>{captureSamplesRef.current=captureSamples;},[captureSamples]);
+  const captureStatusRef=useRef(captureStatus);
+  useLayoutEffect(()=>{captureStatusRef.current=captureStatus;},[captureStatus]);
 
   const handleTelemetryToggle = () => {
-    if (telemetryConnected === 'disconnected') {
-      setTelemetryConnected('connecting');
+    if (bridgeStatus === 'disconnected') {
+      setBridgeStatus('connecting');
+      setPacketStatus('idle');
+      setCaptureStatus('inactive');
+      setPendingSnapshot(null);
     } else {
-      setTelemetryConnected('disconnected');
-      setTelemetryData(null);
+      setBridgeStatus('disconnected');
+      setPacketStatus('idle');
+      setCaptureStatus('inactive');
+      setLastPacket(null);
+      setPendingSnapshot(null);
+      setPacketDiag({count:0,lastAt:null,format:null,warning:null,staleCount:0,rate:0,packetLength:null});
+      packetTimestampsRef.current = [];
     }
   };
 
-  // SSE Connection logic
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  const STALE_TIMEOUT=4000;       // ms without a packet before marking stale
+  const CAPTURE_DURATION=8000;    // ms capture window
+  const CAPTURE_MIN_SAMPLES=8;    // minimum weight samples for confident estimate
+
+  const stopCapture=(reason)=>{
+    if(captureTimerRef.current){clearTimeout(captureTimerRef.current);captureTimerRef.current=null;}
+    if(staleTimerRef.current){clearTimeout(staleTimerRef.current);staleTimerRef.current=null;}
+    const status=captureStatusRef.current;
+    if(status!=='active')return;
+    if(reason==='cancelled'){
+      setCaptureStatus('cancelled');
+      setCaptureSamples([]);
+      setCapturePeakHp(0);
+      setCapturePeakTorque(0);
+      setCaptureMaxRpm(0);
+      setCapturePeakSpeed(0);
+      setPendingSnapshot(null);
+      return;
+    }
+    const samples=captureSamplesRef.current;
+    // Generate pending snapshot from captured samples
+    const medianWeight=samples.length>=CAPTURE_MIN_SAMPLES?getMedian(samples):null;
+    const pkt=lastPacketRef.current;
+    const candidates=buildSnapshotCandidates(pkt,medianWeight,samples.length,
+      capturePeakHpRef.current,capturePeakTorqueRef.current,captureMaxRpmRef.current,captureCarOrdinalRef.current,capturePeakSpeedRef.current);
+    if(candidates.length>0){
+      setCaptureStatus('complete');
+      setPendingSnapshot({candidates,capturedAt:Date.now(),carOrdinal:captureCarOrdinalRef.current});
+    }else{
+      setCaptureStatus('insufficient');
+    }
+  };
+
+  const buildSnapshotCandidates=(pkt,medianWeight,sampleCount,peakHp,peakTorque,maxRpm,carOrdinal,peakSpeed)=>{
+    if(!pkt)return[];
+    const candidates=[];
+    const dbCar=carOrdinal!=null?CAR_DATABASE[String(carOrdinal)]:null;
+    // Car name (lookup)
+    if(dbCar){
+      candidates.push({field:'carName',value:dbCar.name,source:'lookup',confidence:'medium',explanation:'Matched by CarOrdinal in local database.'});
+    }else if(carOrdinal!=null){
+      candidates.push({field:'carName',value:`Car #${carOrdinal}`,source:'parsed',confidence:'low',explanation:'CarOrdinal not found in local database.'});
+    }
+    // Layout (parsed or lookup)
+    const layouts=['FWD','RWD','AWD'];
+    const parsedLayout=layouts[pkt.DrivetrainType]||null;
+    if(dbCar&&dbCar.layout){
+      candidates.push({field:'layout',value:dbCar.layout,source:'lookup',confidence:'medium',explanation:'Layout from database lookup.'});
+    }else if(parsedLayout){
+      candidates.push({field:'layout',value:parsedLayout,source:'parsed',confidence:'medium',explanation:'Layout parsed from telemetry DrivetrainType.'});
+    }else{
+      candidates.push({field:'layout',value:null,source:'unavailable',confidence:'unknown',explanation:'Layout not available — enter manually.'});
+    }
+    // Weight (estimated or lookup)
+    if(medianWeight!=null&&sampleCount>=CAPTURE_MIN_SAMPLES){
+      const conf=sampleCount>=30?'medium':'low';
+      candidates.push({field:'weight',value:Math.round(medianWeight),source:'estimated',confidence:conf,explanation:`Median of ${sampleCount} samples during capture window.`});
+    }else if(dbCar&&dbCar.weight){
+      candidates.push({field:'weight',value:dbCar.weight,source:'lookup',confidence:'low',explanation:'Stock weight from database — may differ from upgraded weight.'});
+    }else{
+      candidates.push({field:'weight',value:null,source:'unavailable',confidence:'unknown',explanation:'Insufficient samples for estimate. Enter manually.'});
+    }
+    // Front bias (lookup only — not directly in telemetry)
+    if(dbCar&&dbCar.frontBias!=null){
+      candidates.push({field:'frontBias',value:dbCar.frontBias,source:'lookup',confidence:'low',explanation:'Stock front bias from database — may differ from upgraded.'});
+    }else{
+      candidates.push({field:'frontBias',value:null,source:'unavailable',confidence:'unknown',explanation:'Front bias not available from telemetry. Enter manually.'});
+    }
+    // Max RPM (parsed)
+    if(pkt.EngineMaxRpm>0){
+      candidates.push({field:'maxRpm',value:Math.round(pkt.EngineMaxRpm),source:'parsed',confidence:'high',explanation:'Direct from telemetry EngineMaxRpm field.'});
+    }else{
+      candidates.push({field:'maxRpm',value:null,source:'unavailable',confidence:'unknown',explanation:'Max RPM not available.'});
+    }
+    // Peak power (parsed)
+    if(peakHp>0){
+      candidates.push({field:'peakPower',value:Math.round(peakHp),source:'parsed',confidence:'high',explanation:'Peak horsepower observed during capture.'});
+    }
+    // Peak torque (parsed)
+    if(peakTorque>0){
+      candidates.push({field:'peakTorque',value:Math.round(peakTorque),source:'parsed',confidence:'high',explanation:'Peak torque observed during capture.'});
+    }
+    // Peak speed (parsed)
+    if(peakSpeed>0){
+      const speedVal = metricUnits ? (peakSpeed / KMH_PER_MPH) : (peakSpeed / MPH_TO_MS);
+      candidates.push({field:'peakSpeed',value:Math.round(speedVal),source:'parsed',confidence:'high',explanation:`Peak speed observed during capture, converted to ${metricUnits?'km/h':'mph'}.`});
+    }
+    // Mark unavailable direct fields
+    candidates.push({field:'springRate',value:null,source:'unavailable',confidence:'unknown',explanation:'Spring rates not provided by Data Out.'});
+    candidates.push({field:'damping',value:null,source:'unavailable',confidence:'unknown',explanation:'Damping settings not provided by Data Out.'});
+    candidates.push({field:'arb',value:null,source:'unavailable',confidence:'unknown',explanation:'ARB settings not provided by Data Out.'});
+    candidates.push({field:'brakeBalance',value:null,source:'unavailable',confidence:'unknown',explanation:'Brake balance not provided by Data Out.'});
+    candidates.push({field:'diffSettings',value:null,source:'unavailable',confidence:'unknown',explanation:'Differential settings not provided by Data Out.'});
+    return candidates;
+  };
+
+  const applySnapshot=(selectedFields)=>{
+    const snap=pendingSnapshot;
+    if(!snap)return;
+    const sources={};
+    const candMap={};
+    snap.candidates.forEach(c=>{candMap[c.field]=c;});
+    // Apply each selected field once
+    selectedFields.forEach(field=>{
+      const c=candMap[field];
+      if(!c||c.value==null)return;
+      switch(field){
+        case 'weight':setCh(p=>({...p,weight:c.value}));sources.weight=c;break;
+        case 'frontBias':setCh(p=>({...p,frontBias:c.value}));sources.frontBias=c;break;
+        case 'layout':setDr(p=>({...p,layout:c.value}));sources.layout=c;break;
+        case 'maxRpm':case 'peakPower':case 'peakTorque':case 'carName':case 'peakSpeed':
+          // Informational only — stored in applied snapshot metadata
+          sources[field]=c;break;
+      }
+    });
+    setAppliedSnapshot({values:selectedFields.reduce((a,f)=>{a[f]=candMap[f]?.value;return a;},{}),
+                        sources,appliedAt:Date.now()});
+    // Persist source metadata
+    const persistSources={};
+    Object.entries(sources).forEach(([k,c])=>{persistSources[k]={source:c.source,confidence:c.confidence,appliedAt:Date.now()};});
+    setFieldSources(p=>({...p,...persistSources}));
+    setPendingSnapshot(null);
+    setCaptureStatus('inactive');
+    setCaptureSamples([]);
+    setCapturePeakHp(0);
+    setCapturePeakTorque(0);
+    setCapturePeakSpeed(0);
+  };
+
+  const cancelSnapshot=()=>{
+    setPendingSnapshot(null);
+    setCaptureStatus('inactive');
+    setCaptureSamples([]);
+    setCapturePeakHp(0);
+    setCapturePeakTorque(0);
+    setCapturePeakSpeed(0);
+  };
+
+  const startRecapture=()=>{
+    setCaptureStatus('active');
+    setCaptureSamples([]);
+    setCapturePeakHp(0);
+    setCapturePeakTorque(0);
+    setCaptureMaxRpm(0);
+    setCapturePeakSpeed(0);
+    setCaptureCarOrdinal(lastPacketRef.current?.CarOrdinal??null);
+    setPendingSnapshot(null);
+    if(captureTimerRef.current)clearTimeout(captureTimerRef.current);
+    captureTimerRef.current=setTimeout(()=>stopCapture('timeout'),CAPTURE_DURATION);
+  };
+
+  // SSE Connection + Capture logic
   useEffect(() => {
-    if (telemetryConnected === 'disconnected') return;
+    if (bridgeStatus !== 'connecting' && bridgeStatus !== 'connected') return;
+    // If already connected and re-running due to URL change, skip re-creation
+    // (the EventSource handles reconnection internally)
 
     let es;
     try {
       es = new EventSource(telemetryUrl);
       
       es.onopen = () => {
-        setTelemetryConnected('connected');
+        setBridgeStatus('connected');
+        setPacketStatus('waiting');
+        setPacketDiag(p=>({...p,count:0,lastAt:null,format:null,warning:null,staleCount:0,rate:0,packetLength:null}));
+        packetTimestampsRef.current = [];
       };
 
       es.onerror = () => {
-        setTelemetryConnected('disconnected');
-        if (es) es.close();
+        setBridgeStatus('disconnected');
+        setPacketStatus('idle');
+        if(es)es.close();
       };
 
       es.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          setTelemetryData(data);
-          
-          if (data.IsRaceOn) {
-            // HP and Torque tracking
-            const horsepower = data.Power / 745.7;
-            const torqueFtLbs = data.Torque * 0.73756;
-            
-            if (!isNaN(horsepower)) {
-              setPeakHp(prev => Math.max(prev, horsepower));
-            }
-            if (!isNaN(torqueFtLbs)) {
-              setPeakTorque(prev => Math.max(prev, torqueFtLbs));
-            }
+          const now=Date.now();
+          setLastPacket(data);
 
-            // Drivetrain layout mapping
-            const layouts = ['FWD', 'RWD', 'AWD'];
-            const layoutStr = layouts[data.DrivetrainType] || 'RWD';
-            if (layoutLockedRef.current) {
-              setDr(prev => {
-                if (prev.layout !== layoutStr) {
-                  return { ...prev, layout: layoutStr };
-                }
-                return prev;
-              });
+          // Calculate packet rate over a rolling window of the last 20 packet timestamps
+          packetTimestampsRef.current.push(now);
+          if (packetTimestampsRef.current.length > 20) {
+            packetTimestampsRef.current.shift();
+          }
+          let hz = 0;
+          if (packetTimestampsRef.current.length > 1) {
+            const duration = (packetTimestampsRef.current[packetTimestampsRef.current.length - 1] - packetTimestampsRef.current[0]) / 1000;
+            if (duration > 0) {
+              hz = (packetTimestampsRef.current.length - 1) / duration;
             }
+          }
 
-            // Dynamic mass estimation
-            const speedMS = data.Speed;
-            const accelZ = data.AccelerationZ;
-            const powerW = data.Power;
-            
-            if (data.Accel > 204 && data.Brake === 0 && speedMS > 10 && accelZ > 0.5 && powerW > 0) {
-              const massKg = powerW / (speedMS * accelZ);
-              const weightLbs = massKg * KG_TO_LB;
-              
-              setWeightEstimates(prev => {
-                const next = [...prev, weightLbs];
-                if (next.length > 80) {
-                  next.shift();
-                }
-                return next;
-              });
+          setPacketDiag(p=>({...p,
+            count:p.count+1,
+            lastAt:now,
+            format:data.parserLabel||null,
+            warning:data.parserWarning||null,
+            staleCount:0,
+            rate:hz,
+            packetLength:data.packetLength||null
+          }));
+          setPacketStatus('receiving');
+          // Reset stale timer
+          if(staleTimerRef.current)clearTimeout(staleTimerRef.current);
+          staleTimerRef.current=setTimeout(()=>{
+            setPacketStatus('stale');
+            setPacketDiag(p=>({...p,staleCount:(p.staleCount||0)+1}));
+          },STALE_TIMEOUT);
+
+          // Packet diagnostics only — NO continuous calculator mutation
+          if(!data.packetSupported)return; // Skip unsupported packets
+
+          // Capture logic
+          if(data.IsRaceOn){
+            const capStat=captureStatusRef.current;
+            // Auto-start first-drive capture if no snapshot exists
+            if(capStat==='inactive'&&!pendingSnapshotRef.current&&!appliedSnapshotRef.current){
+              setCaptureStatus('active');
+              setCaptureSamples([]);
+              setCapturePeakHp(0);
+              setCapturePeakTorque(0);
+              setCaptureMaxRpm(0);
+              setCapturePeakSpeed(0);
+              setCaptureCarOrdinal(data.CarOrdinal??null);
+              if(captureTimerRef.current)clearTimeout(captureTimerRef.current);
+              captureTimerRef.current=setTimeout(()=>stopCapture('timeout'),CAPTURE_DURATION);
+            }
+            // Collect data during active capture
+            if(capStat==='active'){
+              const horsepower=data.Power/745.7;
+              const torqueFtLbs=data.Torque*0.73756;
+              if(!isNaN(horsepower))setCapturePeakHp(p=>Math.max(p,horsepower));
+              if(!isNaN(torqueFtLbs))setCapturePeakTorque(p=>Math.max(p,torqueFtLbs));
+              if(data.EngineMaxRpm>0)setCaptureMaxRpm(p=>Math.max(p,data.EngineMaxRpm));
+              if(data.CarOrdinal!=null&&captureCarOrdinalRef.current==null)setCaptureCarOrdinal(data.CarOrdinal);
+              if(data.Speed!=null&&!isNaN(data.Speed))setCapturePeakSpeed(p=>Math.max(p,data.Speed));
+              // Weight estimation samples
+              const speedMS=data.Speed;
+              const accelZ=data.AccelerationZ;
+              const powerW=data.Power;
+              if(data.Accel>204&&data.Brake===0&&speedMS>10&&accelZ>0.5&&powerW>0){
+                const massKg=powerW/(speedMS*accelZ);
+                const weightLbs=massKg*KG_TO_LB;
+                setCaptureSamples(p=>{
+                  const n=[...p,weightLbs];
+                  if(n.length>80)n.shift();
+                  if(n.length===80){
+                    setTimeout(()=>stopCapture('sample_target'),0);
+                  }
+                  return n;
+                });
+              }
             }
           }
         } catch (err) {
@@ -2178,73 +2433,15 @@ function App(){
       };
     } catch (e) {
       console.error("EventSource initialization failed", e);
-      setTelemetryConnected('disconnected');
+      setBridgeStatus('disconnected');
     }
 
     return () => {
-      if (es) es.close();
+      if(es)es.close();
+      if(captureTimerRef.current)clearTimeout(captureTimerRef.current);
+      if(staleTimerRef.current)clearTimeout(staleTimerRef.current);
     };
-  }, [telemetryConnected, telemetryUrl]);
-
-  // Reset peak values and weight estimates if car changes
-  const lastCarOrdinal = useRef(null);
-  useEffect(() => {
-    if (telemetryData && telemetryData.CarOrdinal !== lastCarOrdinal.current) {
-      lastCarOrdinal.current = telemetryData.CarOrdinal;
-      setPeakHp(0);
-      setPeakTorque(0);
-      setWeightEstimates([]);
-    }
-  }, [telemetryData]);
-
-  // Sync locked inputs to telemetry / database lookup
-  useEffect(() => {
-    if (!telemetryData || !telemetryData.IsRaceOn) return;
-
-    const dbCar = CAR_DATABASE[String(telemetryData.CarOrdinal)];
-    
-    // Front bias sync
-    if (frontBiasLocked && dbCar) {
-      setCh(prev => {
-        if (prev.frontBias !== dbCar.frontBias) {
-          return { ...prev, frontBias: dbCar.frontBias };
-        }
-        return prev;
-      });
-    }
-
-    // Layout sync
-    const layouts = ['FWD', 'RWD', 'AWD'];
-    const layoutStr = dbCar ? dbCar.layout : (layouts[telemetryData.DrivetrainType] || 'RWD');
-    if (layoutLocked) {
-      setDr(prev => {
-        if (prev.layout !== layoutStr) {
-          return { ...prev, layout: layoutStr };
-        }
-        return prev;
-      });
-    }
-
-    // Weight sync (Stock or Estimated)
-    if (weightLocked) {
-      let targetWeight = null;
-      if (weightEstimates.length >= 15) {
-        targetWeight = estimatedWeight;
-      } else if (dbCar) {
-        targetWeight = dbCar.weight;
-      }
-
-      if (targetWeight !== null && targetWeight > 0) {
-        setCh(prev => {
-          const diff = Math.abs(prev.weight - targetWeight);
-          if (diff > 1) {
-            return { ...prev, weight: Math.round(targetWeight) };
-          }
-          return prev;
-        });
-      }
-    }
-  }, [telemetryData, weightLocked, frontBiasLocked, layoutLocked, estimatedWeight, weightEstimates.length]);
+  }, [bridgeStatus, telemetryUrl]); // eslint-disable-line
   const bumpZoom=d=>setUiZoom(z=>parseFloat(Math.max(0.7,Math.min(1.6,z+d)).toFixed(2)));
   const[tutSeen,setTutSeen]=usePersist('suspos_tutorial_seen_v1',{beginner:false,intermediate:false,pro:false});
   const[balTutSeen,setBalTutSeen]=usePersist('suspos_baltut_seen_v1',false);
@@ -2356,9 +2553,25 @@ function App(){
   // sidebar grows with the display: 300px baseline, up to 440px at very wide screens.
   const sidebarWidth=isMobile?300:Math.min(440,Math.max(300,Math.floor(windowWidth*0.25)));
 
-  const pCh=k=>v=>setCh(p=>({...p,[k]:v}));
+  const pCh=k=>v=>{
+    setCh(p=>({...p,[k]:v}));
+    if (k === 'weight' || k === 'frontBias') {
+      setFieldSources(p => ({
+        ...p,
+        [k]: { source: 'manual', confidence: 'high', appliedAt: Date.now() }
+      }));
+    }
+  };
   const pFe=k=>v=>setFe(p=>({...p,[k]:v}));
-  const pDr=k=>v=>setDr(p=>({...p,[k]:v}));
+  const pDr=k=>v=>{
+    setDr(p=>({...p,[k]:v}));
+    if (k === 'layout') {
+      setFieldSources(p => ({
+        ...p,
+        [k]: { source: 'manual', confidence: 'high', appliedAt: Date.now() }
+      }));
+    }
+  };
   const pAl=k=>v=>setAl(p=>({...p,[k]:v}));
   const pBr=k=>v=>setBr(p=>({...p,[k]:v}));
   const tog=k=>()=>setOpen(p=>({...p,[k]:!p[k]}));
@@ -2753,53 +2966,156 @@ function App(){
             </div>
           )}
 
-          {/* LIVE TELEMETRY panel */}
+          {/* TELEMETRY panel — capture workflow */}
           <div id="zone-telemetry">
-            <Sec title="LIVE TELEMETRY" open={open.telemetryOpen} onToggle={tog('telemetryOpen')}>
-              <div style={{marginBottom:12}}>
+            <Sec title="TELEMETRY" open={open.telemetryOpen} onToggle={tog('telemetryOpen')}>
+              {/* Bridge connection */}
+              <div style={{marginBottom:8}}>
                 <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-                  <span style={{fontSize:12,color:'#9ca3af'}}>Bridge URL</span>
+                  <span style={{fontSize:12,color:'#9ca3af'}}>Bridge</span>
                   <div style={{display:'flex',alignItems:'center',gap:6}}>
-                    <span style={{width:8,height:8,borderRadius:'50%',background:telemetryConnected === 'connected' ? '#22c55e' : telemetryConnected === 'connecting' ? '#eab308' : '#ef4444'}}/>
-                    <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase'}}>{telemetryConnected}</span>
+                    <span style={{width:8,height:8,borderRadius:'50%',background:bridgeStatus==='connected'?'#22c55e':bridgeStatus==='connecting'?'#eab308':'#ef4444'}}/>
+                    <span style={{fontSize:10,color:'#9ca3af',textTransform:'uppercase'}}>{bridgeStatus}</span>
                   </div>
                 </div>
                 <div style={{display:'flex',gap:6}}>
-                  <input 
-                    type="text" 
-                    value={telemetryUrl} 
+                  <input type="text" value={telemetryUrl}
                     onChange={e=>setTelemetryUrl(e.target.value)}
-                    disabled={telemetryConnected!=='disconnected'}
-                    style={{
-                      flex:1,
-                      background:'#0a0f1a',
-                      border:'1px solid #1e293b',
-                      borderRadius:2,
-                      color:'#e2e8f0',
-                      fontFamily:'Courier New',
-                      fontSize:12,
-                      padding:'4px 6px',
-                      outline:'none'
-                    }}
-                  />
-                  <button 
-                    className={`tog${telemetryConnected!=='disconnected'?' on':''}`}
+                    disabled={bridgeStatus!=='disconnected'}
+                    style={{flex:1,background:'#0a0f1a',border:'1px solid #1e293b',borderRadius:2,
+                      color:'#e2e8f0',fontFamily:'Courier New',fontSize:12,padding:'4px 6px',outline:'none'}}/>
+                  <button className={`tog${bridgeStatus!=='disconnected'?' on':''}`}
                     onClick={handleTelemetryToggle}
-                    style={{padding:'4px 10px',fontSize:11,width:90}}
-                  >
-                    {telemetryConnected==='disconnected'?'CONNECT':'DISCONNECT'}
+                    style={{padding:'4px 10px',fontSize:11,width:90}}>
+                    {bridgeStatus==='disconnected'?'CONNECT':'DISCONNECT'}
                   </button>
                 </div>
               </div>
-              <div style={{marginTop:10,display:'flex',flexDirection:'column',gap:4}}>
-                <Stat label="Car" value={telemetryData ? (CAR_DATABASE[String(telemetryData.CarOrdinal)] ? CAR_DATABASE[String(telemetryData.CarOrdinal)].name : `ID: ${telemetryData.CarOrdinal}`) : '—'} unit=""/>
-                <Stat label="Layout" value={telemetryData ? (['FWD', 'RWD', 'AWD'][telemetryData.DrivetrainType] || '—') : '—'} unit=""/>
-                <Stat label="Speed" value={telemetryData ? (metricUnits ? `${Math.round((telemetryData.Speed / MPH_TO_MS) * KMH_PER_MPH)} km/h` : `${Math.round(telemetryData.Speed / MPH_TO_MS)} mph`) : '—'} unit=""/>
-                <Stat label="RPM" value={telemetryData ? `${Math.round(telemetryData.CurrentEngineRpm)} / ${Math.round(telemetryData.EngineMaxRpm)} rpm` : '—'} unit=""/>
-                <Stat label="Peak HP" value={peakHp > 0 ? `${Math.round(peakHp)} hp` : '—'} unit=""/>
-                <Stat label="Peak Torque" value={peakTorque > 0 ? (metricUnits ? `${Math.round(peakTorque / 0.73756)} N·m` : `${Math.round(peakTorque)} lb-ft`) : '—'} unit=""/>
-                <Stat label="Est. Weight" value={telemetryData ? (weightEstimates.length < 15 ? `Estimating (${weightEstimates.length}/15)...` : (metricUnits ? `${Math.round(estimatedWeight / KG_TO_LB)} kg` : `${Math.round(estimatedWeight)} lb`)) : '—'} unit=""/>
-              </div>
+
+              {/* Packet status */}
+              {bridgeStatus==='connected'&&<div style={{marginBottom:8,padding:'5px 8px',background:'#0a0f1a',borderRadius:2,border:'1px solid #1e293b'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
+                  <span style={{fontSize:10,color:'#94a3b8',letterSpacing:1}}>PACKETS</span>
+                  <span style={{fontSize:10,color:packetStatus==='receiving'?'#22c55e':packetStatus==='stale'?'#eab308':'#94a3b8',textTransform:'uppercase'}}>{packetStatus}</span>
+                </div>
+                {packetDiag.format&&<div style={{fontSize:10,color:'#9ca3af'}}>Format: {packetDiag.format}</div>}
+                {packetDiag.count>0&&<div style={{fontSize:10,color:'#9ca3af'}}>Count: {packetDiag.count} · Last: {packetDiag.lastAt?((Date.now()-packetDiag.lastAt)/1000).toFixed(1)+'s ago':'—'}</div>}
+                {packetDiag.count>0&&<div style={{fontSize:10,color:'#9ca3af'}}>Rate: {packetDiag.rate!=null?packetDiag.rate.toFixed(1)+' Hz':'—'} · Length: {packetDiag.packetLength!=null?packetDiag.packetLength+' B':'—'}</div>}
+                {packetDiag.warning&&<div style={{fontSize:10,color:'#f59e0b',marginTop:2}}>⚠ {packetDiag.warning}</div>}
+                {packetStatus==='stale'&&<div style={{fontSize:10,color:'#eab308',marginTop:2}}>Packets stopped — Forza may be in menus or not driving.</div>}
+                {packetStatus==='waiting'&&<div style={{fontSize:10,color:'#94a3b8',marginTop:2}}>Waiting for driving data — Forza Data Out only streams while driving.</div>}
+              </div>}
+
+              {/* Capture status */}
+              {bridgeStatus==='connected'&&<div style={{marginBottom:8,padding:'5px 8px',background:'#0a0f1a',borderRadius:2,border:'1px solid #1e293b'}}>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                  <span style={{fontSize:10,color:'#94a3b8',letterSpacing:1}}>CAPTURE</span>
+                  <span style={{fontSize:10,color:captureStatus==='active'?'#22c55e':captureStatus==='complete'?'#6366f1':captureStatus==='insufficient'?'#f59e0b':captureStatus==='cancelled'?'#94a3b8':'#94a3b8',textTransform:'uppercase'}}>{captureStatus}</span>
+                </div>
+                {captureStatus==='active'&&<div style={{fontSize:10,color:'#94a3b8',marginTop:2}}>
+                  Sampling… {captureSamples.length} weight samples
+                  {captureCarOrdinal!=null&&<span> · Car #{captureCarOrdinal}</span>}
+                </div>}
+                {captureStatus==='complete'&&<div style={{fontSize:10,color:'#6366f1',marginTop:2}}>Snapshot ready for review below.</div>}
+                {captureStatus==='insufficient'&&<div style={{fontSize:10,color:'#f59e0b',marginTop:2}}>Insufficient data. Try driving or recapture.</div>}
+                {(captureStatus==='complete'||captureStatus==='insufficient'||captureStatus==='inactive'||captureStatus==='cancelled')&&appliedSnapshot&&(
+                  <div style={{fontSize:10,color:'#22c55e',marginTop:2}}>Snapshot applied — inputs locked.</div>
+                )}
+                {(captureStatus==='complete'||captureStatus==='insufficient'||captureStatus==='cancelled'||(captureStatus==='inactive'&&!appliedSnapshot))&&bridgeStatus==='connected'&&(
+                  <button className="tbtn" style={{marginTop:6,fontSize:10,padding:'4px 8px',width:'100%'}}
+                    onClick={startRecapture}>
+                    {captureStatus==='complete'||captureStatus==='insufficient'||captureStatus==='cancelled'?'↻ RECAPTURE':'▶ CAPTURE'}
+                  </button>
+                )}
+                {captureStatus==='active'&&(
+                  <button className="tbtn" style={{marginTop:6,fontSize:10,padding:'4px 8px',width:'100%',color:'#f59e0b'}}
+                    onClick={()=>stopCapture('cancelled')}>✕ CANCEL CAPTURE</button>
+                )}
+              </div>}
+
+              {/* Snapshot review */}
+              {pendingSnapshot&&(
+                <div style={{marginBottom:8,padding:'8px',background:'#0a0f1a',borderRadius:2,border:'1px solid #6366f155'}}>
+                  <div style={{fontSize:10,color:'#6366f1',letterSpacing:2,marginBottom:6}}>REVIEW SNAPSHOT</div>
+                  {pendingSnapshot.candidates.map(c=>{
+                    const isSelected = !!selectedCandidates[c.field];
+                    const isDisabled = c.value == null || c.source === 'unavailable';
+                    const srcColor={parsed:'#22c55e',lookup:'#60a5fa',estimated:'#eab308',manual:'#94a3b8',restored:'#818cf8',unavailable:'#475569'}[c.source]||'#94a3b8';
+                    const confColor={high:'#22c55e',medium:'#eab308',low:'#f97316',unknown:'#475569'}[c.confidence]||'#94a3b8';
+                    return(
+                      <div key={c.field} style={{
+                        display:'flex',
+                        justifyContent:'space-between',
+                        alignItems:'flex-start',
+                        padding:'3px 0',
+                        borderBottom:'1px solid #0f172a',
+                        fontSize:10,
+                        opacity: isSelected ? 1 : 0.4,
+                        transition: 'opacity 0.15s'
+                      }}>
+                        {!isDisabled && (
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={e => {
+                              setSelectedCandidates(p => ({...p, [c.field]: e.target.checked}));
+                            }}
+                            style={{marginRight:6, marginTop:2, cursor:'pointer'}}
+                          />
+                        )}
+                        <div style={{flex:1}}>
+                          <div style={{color:'#9ca3af'}}>{c.field}</div>
+                          {c.value!=null?<div style={{fontSize:12,color:'#e2e8f0',fontWeight:700,fontFamily:'Courier New',marginTop:1}}>{String(c.value)}</div>:<div style={{color:'#475569',fontStyle:'italic'}}>unavailable</div>}
+                          <div style={{fontSize:9,color:'#475569',marginTop:1}}>{c.explanation}</div>
+                        </div>
+                        <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:2,flexShrink:0}}>
+                          <span style={{fontSize:8,letterSpacing:0.5,padding:'1px 3px',borderRadius:2,background:srcColor+'18',color:srcColor,border:`1px solid ${srcColor}33`}}>{c.source.toUpperCase()}</span>
+                          <span style={{fontSize:8,letterSpacing:0.5,padding:'1px 3px',borderRadius:2,background:confColor+'18',color:confColor,border:`1px solid ${confColor}33`}}>{c.confidence.toUpperCase()}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  <div style={{display:'flex',gap:4,marginTop:8}}>
+                    <button className="tbtn on" style={{flex:1,fontSize:10,padding:'5px 8px'}}
+                      onClick={()=>applySnapshot(Object.keys(selectedCandidates).filter(k=>selectedCandidates[k]))}>
+                      APPLY SELECTED
+                    </button>
+                    <button className="tbtn" style={{flex:1,fontSize:10,padding:'5px 8px'}}
+                      onClick={cancelSnapshot}>
+                      KEEP CURRENT
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* Applied snapshot summary */}
+              {appliedSnapshot&&!pendingSnapshot&&(
+                <div style={{marginBottom:8,padding:'5px 8px',background:'#0a0f1a',borderRadius:2,border:'1px solid #22c55e33'}}>
+                  <div style={{fontSize:10,color:'#22c55e',letterSpacing:2,marginBottom:3}}>APPLIED</div>
+                  {Object.entries(appliedSnapshot.values).map(([k,v])=>(
+                    <div key={k} style={{fontSize:10,display:'flex',justifyContent:'space-between',color:'#9ca3af'}}>
+                      <span>{k}</span>
+                      <span style={{color:'#e2e8f0',fontFamily:'Courier New'}}>{v!=null?String(v):'—'}</span>
+                    </div>
+                  ))}
+                  {appliedSnapshot.appliedAt&&<div style={{fontSize:9,color:'#475569',marginTop:3}}>
+                    {new Date(appliedSnapshot.appliedAt).toLocaleTimeString()}
+                  </div>}
+                </div>
+              )}
+
+              {/* Live diagnostics (always visible when connected, does NOT mutate inputs) */}
+              {bridgeStatus==='connected'&&lastPacket&&lastPacket.packetSupported&&(
+                <div style={{marginTop:6,display:'flex',flexDirection:'column',gap:3}}>
+                  <div style={{fontSize:10,color:'#475569',letterSpacing:1}}>DIAGNOSTICS</div>
+                  <div style={{display:'flex',flexWrap:'wrap',gap:'2px 12px',fontSize:10,color:'#9ca3af'}}>
+                    <span>RPM {lastPacket.CurrentEngineRpm!=null?Math.round(lastPacket.CurrentEngineRpm):'—'}</span>
+                    <span>SPD {lastPacket.Speed!=null?(metricUnits?Math.round(lastPacket.Speed/KMH_PER_MPH):Math.round(lastPacket.Speed/MPH_TO_MS)):'—'}{metricUnits?'km/h':'mph'}</span>
+                    <span>PWR {lastPacket.Power!=null?Math.round(lastPacket.Power/745.7):'—'}hp</span>
+                    <span>CAR #{lastPacket.CarOrdinal!=null?lastPacket.CarOrdinal:'—'}</span>
+                  </div>
+                </div>
+              )}
             </Sec>
           </div>
 
@@ -2822,7 +3138,6 @@ function App(){
                 <div id="zone-layout-build" style={dim('layout-build')}>
                 <div style={{fontSize:10,color:'#94a3b8',letterSpacing:2,marginBottom:14}}>CHASSIS</div>
                 <Toggle label="Layout" value={dr.layout} onChange={pDr('layout')}
-                  locked={layoutLocked} onToggleLock={()=>setLayoutLocked(!layoutLocked)}
                   options={[{value:'FWD',label:'FWD'},{value:'RWD',label:'RWD'},{value:'AWD',label:'AWD'}]}/>
                 </div>
                 <div id="zone-build-type" style={dim('build-type')}>
@@ -2835,12 +3150,14 @@ function App(){
                   onChange={metricUnits?v=>pCh('weight')(v*KG_TO_LB):pCh('weight')}
                   min={metricUnits?45:100} max={metricUnits?8165:18000} step={1}
                   unit={metricUnits?'kg':'lb'} logScale={true} logMid={metricUnits?2722:6000}
-                  hint="Total vehicle weight. Find this on the car's stat page in Forza."
-                  locked={weightLocked} onToggleLock={()=>setWeightLocked(!weightLocked)}/>
+                  hint="Total vehicle weight. Find this on the car's stat page in Forza."/>
                 <Field label="Front Weight Bias" value={ch.frontBias} onChange={pCh('frontBias')}
                   min={30} max={70} step={1} unit="%"
-                  hint="Percentage of total weight on the front axle. Shown on the car selection screen. 50% = perfect balance."
-                  locked={frontBiasLocked} onToggleLock={()=>setFrontBiasLocked(!frontBiasLocked)}/>
+                  hint="Percentage of total weight on the front axle. Shown on the car selection screen. 50% = perfect balance."/>
+                {(fieldSources.weight||fieldSources.frontBias)&&<div style={{display:'flex',gap:6,marginBottom:8,marginTop:-4}}>
+                  {fieldSources.weight&&<span style={{fontSize:9,color:'#22c55e',background:'#22c55e15',border:'1px solid #22c55e33',borderRadius:2,padding:'1px 5px'}}>wt:{fieldSources.weight.source}</span>}
+                  {fieldSources.frontBias&&<span style={{fontSize:9,color:'#60a5fa',background:'#60a5fa15',border:'1px solid #60a5fa33',borderRadius:2,padding:'1px 5px'}}>bias:{fieldSources.frontBias.source}</span>}
+                </div>}
                 </div>
 
                 <div id="zone-ride-stiffness" style={dim('ride-stiffness')}>
@@ -2910,11 +3227,14 @@ function App(){
               unit={metricUnits?'kg':'lb'} logScale={true} logMid={metricUnits?2722:6000}
               hint={metricUnits
                 ?"Total vehicle weight in kg. Find this on the car's stat page in Forza. Affects spring rates, damper forces, and ARB stiffness directly."
-                :"Total vehicle weight in pounds. Find this on the car's stat page in Forza. Affects spring rates, damper forces, and ARB stiffness directly."}
-              locked={weightLocked} onToggleLock={()=>setWeightLocked(!weightLocked)}/>
+                :"Total vehicle weight in pounds. Find this on the car's stat page in Forza. Affects spring rates, damper forces, and ARB stiffness directly."}/>
             <Field label="Front Weight Bias" value={ch.frontBias} onChange={pCh('frontBias')} min={30} max={70} step={1} unit="%"
-              hint="Percentage of total weight on the front axle. Shown on the car selection screen. 50% = perfect balance. Most front-engined cars are 52–58% front."
-              locked={frontBiasLocked} onToggleLock={()=>setFrontBiasLocked(!frontBiasLocked)}/>
+              hint="Percentage of total weight on the front axle. Shown on the car selection screen. 50% = perfect balance. Most front-engined cars are 52–58% front."/>
+            {/* Source provenance badges */}
+            {(fieldSources.weight||fieldSources.frontBias)&&<div style={{display:'flex',gap:6,marginBottom:8,marginTop:-6}}>
+              {fieldSources.weight&&<span style={{fontSize:9,color:'#22c55e',background:'#22c55e15',border:'1px solid #22c55e33',borderRadius:2,padding:'1px 5px'}}>wt:{fieldSources.weight.source}</span>}
+              {fieldSources.frontBias&&<span style={{fontSize:9,color:'#60a5fa',background:'#60a5fa15',border:'1px solid #60a5fa33',borderRadius:2,padding:'1px 5px'}}>bias:{fieldSources.frontBias.source}</span>}
+            </div>}
             {uiMode==='pro'&&<div style={{display:'flex',alignItems:'center',gap:6,
                          padding:'4px 8px',background:'#0a0f1a',borderRadius:2,
                          border:'1px solid #1e293b',marginBottom:10,marginTop:-4}}>
@@ -3686,8 +4006,10 @@ function App(){
               diffRearDecel:DEF_DR.diffRearDecel,
               diffCenter:DEF_DR.diffCenter}))}>
             <Toggle label="Layout" value={dr.layout} onChange={pDr('layout')}
-              locked={layoutLocked} onToggleLock={()=>setLayoutLocked(!layoutLocked)}
               options={[{value:'FWD',label:'FWD'},{value:'RWD',label:'RWD'},{value:'AWD',label:'AWD'}]}/>
+            {fieldSources.layout&&<div style={{marginBottom:8,marginTop:-4}}>
+              <span style={{fontSize:9,color:'#94a3b8',background:'#94a3b815',border:'1px solid #94a3b833',borderRadius:2,padding:'1px 5px'}}>layout:{fieldSources.layout.source}</span>
+            </div>}
             {uiMode==='pro'&&<div style={{display:'flex',alignItems:'center',gap:6,marginTop:8,marginBottom:10,flexWrap:'wrap'}}>
               <span style={{fontSize:12,color:'#94a3b8'}}>Differential Mode</span>
               <Hint text="AUTO derives lock values from layout, build type, weight bias, and the intent sliders. MANUAL exposes all individual lock percentages directly."/>
