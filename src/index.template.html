@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<!--
+  SUSP OS — Forza Suspension Calculator
+  Physics approach based on NumberlessMath's Forza Suspension Calculator (2020)
+  Original: https://forums.forza.net/t/beta-forza-suspension-calculator/97135
+  Original sheet: https://docs.google.com/spreadsheets/d/1ySrVkgQpohIduhdLCwe99p3d6KmWXKgck5Uk-qDOlPw/edit?usp=sharing
+  MIT License
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
+<title>SUSP.OS</title>
+<script src="https://cdn.jsdelivr.net/npm/react@18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7.26.4/babel.min.js"></script>
+<!-- INJECT_STYLE -->
+</head>
+<body>
+<div id="root">
+  <!-- Shown only if React fails to mount -->
+  <div id="pre-load" style="padding:24px;color:#6b7280;font-family:Courier New,monospace;font-size:12px;background:#020617;min-height:100vh">
+    <div style="color:#e2e8f0;font-size:14px;margin-bottom:8px">SUSP.OS</div>
+    <div style="margin-bottom:16px">Loading...</div>
+  </div>
+</div>
+<script>
+// Global error catcher — fires before React/Babel, shows error on blank screen
+window.onerror=function(msg,src,line,col,err){
+  var d=document.getElementById('pre-load');
+  if(d){
+    d.innerHTML='<div style="color:#e2e8f0;font-size:14px;margin-bottom:8px">SUSP.OS — Failed to load</div>'
+      +'<div style="color:#6b7280;margin-bottom:12px">JavaScript error on line '+line+'</div>'
+      +'<div style="background:#0f172a;padding:12px;border-radius:4px;color:#ef4444;word-break:break-all;line-height:1.6">'+(msg||'Unknown error')+'</div>'
+      +'<button onclick="location.reload()" style="margin-top:16px;padding:8px 16px;background:#0f172a;border:1px solid #1e293b;color:#e2e8f0;border-radius:4px;cursor:pointer;font-family:Courier New;font-size:12px">RELOAD</button>';
+  }
+};
+// Hide the pre-load message once React takes over
+window.addEventListener('DOMContentLoaded',function(){
+  setTimeout(function(){
+    var d=document.getElementById('pre-load');
+    if(d&&d.innerHTML.indexOf('Loading')>-1)d.style.display='none';
+  },5000);
+});
+</script>
+<!-- INJECT_SHARED_MODULES -->
+<script id="app-source" type="text/plain">
+const {useState,useMemo,useRef,useEffect,useLayoutEffect,useCallback}=React;
+
+const {
+  KG_TO_LB, LB_IN_TO_NM, MPH_TO_MS, KMH_PER_MPH, NMM_PER_LBIN, ARB_RS_SCALE, rollCenterHeight, DAMPING_CALIBRATION,
+  TIRE_LOAD_SENS, MECH_BAL_GAIN, WIDTH_GRIP_EXP, TIRE_MECH_SCALE, MECH_BALANCE_TARGET, GAME_LIMITS, HZ_MIN, HZ_MAX, HZ_RANGE,
+  cornerMasses, parseTyre, rsToHz, hzToRs, flatRideRearHz, flatRideSharedHz, solveSpring, solveDamp, solveDampRaw,
+  mechBalanceLLT, balanceFromRsBal, feelToPhysics, computeTune, computeAlignment, computeDiff, computeCheck
+} = window.SUSP_OS_Physics;
+
+const {
+  DEF_CH, DEF_FE, DEF_DR, DEF_BR,
+  encodeTune, decodeTune, sanitizeTune
+} = window.SUSP_OS_Codec;
+
+<!-- INJECT_APP_SOURCE -->
+</script>
+<!-- INJECT_BOOTSTRAP -->
+</body>
+</html>

@@ -2,74 +2,51 @@
 // Run with: node tests.js
 // No dependencies required.
 
+const fs = require('fs');
+const path = require('path');
+const { assembleIndexHtml } = require('./assemble.js');
+const { runRegressionSuite } = require('./tests/regression-runner.js');
+
+// ── synchronization check ──────────────────────────────────────────────────
+console.log('Checking if index.html is synchronized with src/...');
+try {
+  const assembledHtml = assembleIndexHtml();
+  const indexHtmlPath = path.join(__dirname, 'index.html');
+  if (!fs.existsSync(indexHtmlPath)) {
+    console.error('\nERROR: index.html does not exist in root directory!');
+    console.error('Please run: node assemble.js\n');
+    process.exit(1);
+  }
+  const diskHtml = fs.readFileSync(indexHtmlPath, 'utf8').replace(/\r\n/g, '\n');
+  if (assembledHtml !== diskHtml) {
+    console.error('\n================================================================');
+    console.error('❌ ERROR: index.html is OUT OF SYNC with files in src/!');
+    console.error('Changes were made in the src/ directory but not assembled.');
+    console.error('Please run the assembler to compile index.html:');
+    console.error('    node assemble.js');
+    console.error('================================================================\n');
+    process.exit(1);
+  }
+  console.log('✓  index.html is fully synchronized with src/\n');
+} catch (err) {
+  console.error(`\n❌ Error during index.html sync check: ${err.message}\n`);
+  process.exit(1);
+}
+
 const { PARSER_PROFILES, selectParserProfile, parseTelemetryPacket } = require('./forza-bridge.js');
 
-const KG_TO_LB = 2.204622622;
-const LB_IN_TO_NM = 175.126790921;
-const MPH_TO_MS = 0.44704;
-const ARB_RS_SCALE = 240;
-// NOTE: app now uses rollCenterHeight(ch)=ch.cgHeight*0.20 (not a fixed constant)
-const rollCenterHeight = ch => ch.cgHeight * 0.20;
-const DAMPING_CALIBRATION = 0.00135;
-const GAME_LIMITS = { horizon: { damping: 20, arb: 65 }, motorsport: { damping: 40, arb: 40 } };
+const {
+  KG_TO_LB, LB_IN_TO_NM, MPH_TO_MS, ARB_RS_SCALE, rollCenterHeight, DAMPING_CALIBRATION, GAME_LIMITS,
+  TIRE_LOAD_SENS, MECH_BAL_GAIN, WIDTH_GRIP_EXP, HZ_MIN, HZ_MAX,
+  cornerMasses, rsToHz, hzToRs, flatRideRearHz, solveSpring, solveDamp, mechBalanceLLT, balanceFromRsBal
+} = require('./src/physics.js');
 
-// ── mech balance model (must mirror app: mechBalanceLLT / balanceFromRsBal) ──
-const TIRE_LOAD_SENS = 0.15, MECH_BAL_GAIN = 1.8, WIDTH_GRIP_EXP = 0.4;
-const cornerMassesM = ch => {
-  const kg = ch.weight / KG_TO_LB;
-  return { front: (kg * (ch.frontBias / 100)) / 2, rear: (kg * (1 - ch.frontBias / 100)) / 2 };
-};
-const mechBalanceLLT = (ch, Kf, Kr) => {
-  const g = 9.81, a = 1.0, twF = ch.twF ?? 265, twR = ch.twR ?? 265;
-  const m = cornerMassesM(ch), Mf = m.front * 2, Mr = m.rear * 2, Mt = Mf + Mr, RC = rollCenterHeight(ch);
-  const Mphi = Mt * g * a * (ch.cgHeight - RC), sF = Kf / (Kf + Kr);
-  const dWf = Mphi * sF / ch.trackF + Mf * g * a * RC / ch.trackF;
-  const dWr = Mphi * (1 - sF) / ch.trackR + Mr * g * a * RC / ch.trackR;
-  const FzRef = Mt * g / 4;
-  const fy = Fz => { const z = Math.max(0, Fz); return z * Math.max(0, 1 - TIRE_LOAD_SENS * (z / FzRef - 1)); };
-  const wF = Mf * g / 2, wR = Mr * g / 2;
-  const FyF = Math.pow(twF / 265, WIDTH_GRIP_EXP) * (fy(wF + dWf) + fy(wF - dWf));
-  const FyR = Math.pow(twR / 265, WIDTH_GRIP_EXP) * (fy(wR + dWr) + fy(wR - dWr));
-  return Math.max(0, Math.min(1, 0.5 + MECH_BAL_GAIN * (FyF / (Mf * g) - FyR / (Mr * g))));
-};
-const balanceFromRsBal = (ch, rsBal) => {
-  const r = Math.max(1e-4, Math.min(1 - 1e-4, rsBal));
-  return mechBalanceLLT(ch, 1, r / (1 - r));
-};
+const cornerMassesM = cornerMasses;
+
 const rsBalFromBalance = (ch, target) => {
   let lo = 1e-4, hi = 1 - 1e-4;
   for (let i = 0; i < 40; i++) { const mid = (lo + hi) / 2; if (balanceFromRsBal(ch, mid) < target) lo = mid; else hi = mid; }
   return (lo + hi) / 2;
-};
-
-const cornerMasses = ch => {
-  const kg = ch.weight / KG_TO_LB;
-  return { front: (kg * (ch.frontBias / 100)) / 2, rear: (kg * (1 - ch.frontBias / 100)) / 2 };
-};
-
-// Spring-frequency operating band — must mirror app's HZ_MIN/HZ_MAX.
-const HZ_MIN = 0.8, HZ_MAX = 5.5;
-const rsToHz = rs => rs > 6 ? 0.8 + (rs / 100) * 2.7 : rs;
-const hzToRs = hz => Math.round(Math.max(HZ_MIN, Math.min(HZ_MAX, hz)) * 100) / 100;
-
-const flatRideRearHz = (fHz, wb, mph) => {
-  if (mph >= 200) return { hz: fHz, clamped: false };
-  const ms = mph * MPH_TO_MS;
-  if (ms < 1) return { hz: fHz * 1.2, clamped: false };
-  const t = wb / ms, d = (1 / fHz) - (2 * t);
-  const raw = d > 0.05 ? 1 / d : fHz * 1.2;
-  const clamped = raw > HZ_MAX; // absolute game ceiling, not a relative cap
-  return { hz: Math.min(raw, HZ_MAX), clamped };
-};
-
-const solveSpring = (hz, mass, mr) => {
-  const wr = Math.pow(hz * 2 * Math.PI, 2) * mass;
-  return (wr / Math.pow(mr, 2)) / LB_IN_TO_NM;
-};
-
-const solveDamp = (hz, mass, z, lim) => {
-  const wr = Math.pow(hz * 2 * Math.PI, 2) * mass, cc = 2 * Math.sqrt(wr * mass);
-  return Math.min(lim, Math.max(1, cc * (z / 100) * DAMPING_CALIBRATION));
 };
 
 const getMedian = arr => {
@@ -923,7 +900,24 @@ console.log('\ntelemetry mutation regression guard');
   assertEq('ch.weight is not mutated', state2.ch.weight, 3200);
 }
 
+// ── codec roundtrip ───────────────────────────────────────────────────────────
+
+console.log('\ncodec roundtrip');
+{
+  const { encodeTune, decodeTune, DEF_CH, DEF_FE, DEF_DR, DEF_BR } = require('./src/codec.js');
+  const code = encodeTune(DEF_CH, DEF_FE, DEF_DR, DEF_BR);
+  const decoded = decodeTune(code);
+  assertEq('roundtrip weight', decoded.ch.weight, DEF_CH.weight);
+  assertEq('roundtrip frontBias', decoded.ch.frontBias, DEF_CH.frontBias);
+  assertEq('roundtrip layout', decoded.dr.layout, DEF_DR.layout);
+  assertEq('roundtrip rideStiffness', decoded.fe.rideStiffness, DEF_FE.rideStiffness);
+  assertEq('roundtrip brakeBias', decoded.br.brakeBias, DEF_BR.brakeBias);
+}
+
 // ── summary ───────────────────────────────────────────────────────────────────
 
 console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
 if (failed) process.exit(1);
+
+// Run regression suite
+runRegressionSuite();

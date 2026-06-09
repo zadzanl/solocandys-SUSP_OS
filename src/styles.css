@@ -1,0 +1,70 @@
+*{box-sizing:border-box;margin:0;padding:0}
+html{height:100%;height:-webkit-fill-available;height:100dvh;}
+body{background:#020617;color:#cbd5e1;font-family:'Courier New',monospace;overflow:hidden;
+     -webkit-text-size-adjust:100%;height:100%;height:-webkit-fill-available;height:100dvh;}
+@media(max-width:768px){
+  body{overflow:auto}
+  .tog{padding:7px 0;min-height:32px}
+  .tbtn{padding:6px 10px}
+}
+@media(max-width:480px){
+  /* Fluid number inputs so a label + two fields don't overflow a ~375px row.
+     Keep font-size:16px (set on .num) — lowering it makes iOS zoom on focus. */
+  .num{width:62px;min-width:0}
+}
+::-webkit-scrollbar{width:4px;height:4px}
+::-webkit-scrollbar-track{background:#0a0f1a}
+::-webkit-scrollbar-thumb{background:#1e293b;border-radius:2px}
+.sidebar-scroll::-webkit-scrollbar{width:12px}
+.sidebar-scroll::-webkit-scrollbar-track{background:#0a0f1a;border-left:1px solid #0f172a}
+.sidebar-scroll::-webkit-scrollbar-thumb{background:#1e293b;border-radius:2px;border:3px solid #0a0f1a}
+.sidebar-scroll::-webkit-scrollbar-thumb:hover{background:#334155}
+input[type=number]{-moz-appearance:textfield}
+input[type=number]::-webkit-outer-spin-button,
+input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+.num{width:80px;background:transparent;border:1px solid transparent;border-radius:2px;
+     color:#e2e8f0;font-family:'Courier New',monospace;font-size:16px;padding:1px 2px;
+     outline:none;text-align:right;transition:border-color .12s,background .12s}
+.num:hover{border-color:#1e293b}
+.num:focus{border-color:#e2e8f033;background:#0a0f1a}
+.sli{-webkit-appearance:none;appearance:none;width:100%;height:3px;border-radius:1.5px;
+     outline:none;margin-top:6px;cursor:pointer;display:block;border:none;padding:10px 0;
+     box-sizing:content-box;background-clip:content-box}
+.sli::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;background:#e2e8f0;
+  border-radius:50%;cursor:pointer;margin-top:-5.5px;transition:transform .15s;
+  box-shadow:0 0 0 2px #02061799}
+.sli::-webkit-slider-thumb:hover{transform:scale(1.2)}
+.sli::-moz-range-thumb{width:14px;height:14px;background:#e2e8f0;border-radius:50%;border:none;
+  cursor:pointer;box-shadow:0 0 0 2px #02061799}
+.tog{flex:1;padding:3px 0;border:1px solid #1e293b;background:#0a0f1a;color:#6b7280;
+     border-radius:2px;cursor:pointer;font-family:'Courier New',monospace;font-size:11px;
+     letter-spacing:1px;transition:all .12s;-webkit-tap-highlight-color:transparent}
+.tog.on{border-color:#e2e8f033;background:#0f172a;color:#e2e8f0}
+.tbtn{padding:4px 10px;border:1px solid #1e293b;background:transparent;color:#6b7280;
+      border-radius:2px;cursor:pointer;font-family:'Courier New',monospace;font-size:11px;
+      letter-spacing:1px;transition:all .12s;-webkit-tap-highlight-color:transparent}
+.tbtn.on{border-color:#e2e8f044;background:#0f172a;color:#e2e8f0}
+.tbtn.saved{border-color:#e2e8f022;color:#9ca3af}
+.tbtn.undo-btn:disabled{opacity:0.28;cursor:default}
+.collapsible-hdr{transition:background .12s;-webkit-tap-highlight-color:transparent}
+.collapsible-hdr:hover{background:#0a0f1a}
+.stog{width:100%;display:flex;align-items:center;justify-content:space-between;
+      padding:9px 12px;background:none;border:none;border-bottom:1px solid #0f172a;
+      color:#6b7280;cursor:pointer;font-family:'Courier New',monospace;font-size:11px;
+      letter-spacing:2px;text-transform:uppercase;transition:color .12s,background .12s;
+      -webkit-tap-highlight-color:transparent}
+.stog:hover{color:#9ca3af;background:#0a0f1a88}
+.stog-open{color:#9ca3af}
+.card{background:#020617;border:1px solid #1e293b;border-radius:2px;overflow:hidden;margin-bottom:10px}
+.ch{padding:3px 8px;background:#0a0f1a;border-bottom:1px solid #1e293b;
+    display:flex;align-items:center;gap:6px;column-gap:6px}
+.ch span{font-size:10px;color:#9ca3af;letter-spacing:2px;text-transform:uppercase}
+.cb{padding:7px 8px}
+.ro{padding:5px 8px;background:#0f172a;border:1px solid #1e293b;border-radius:2px}
+.rl{font-size:9px;color:#9ca3af;letter-spacing:1px;margin-bottom:1px;text-transform:uppercase}
+.rv{font-size:20px;font-weight:700;line-height:1}
+.rv-lg{font-size:24px;font-weight:700;line-height:1}
+.ru{font-size:9px;color:#6b7280;margin-top:1px}
+.sr{display:flex;justify-content:space-between;align-items:baseline;padding:3px 0;
+    border-bottom:1px solid #0f172a;font-size:11px}
+.sl{color:#9ca3af}.sv{color:#9ca3af;font-size:12px}.su{font-size:10px;color:#6b7280;margin-left:3px}

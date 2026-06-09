@@ -23,7 +23,22 @@ if %errorlevel% neq 0 (
     goto LaunchUI
 )
 
-:: 2. Inform the user and prepare to launch in foreground
+:: 2. Run Build-Time Assembly
+echo Assembling SUSP.OS from source...
+node assemble.js
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Build-time assembly failed!
+    echo Please fix the errors above before launching the application.
+    echo.
+    pause
+    popd
+    exit /b %errorlevel%
+)
+echo Assembly successful.
+echo.
+
+:: 3. Inform the user and prepare to launch in foreground
 echo Starting SUSP.OS Telemetry Bridge...
 echo [NOTE] Keep this window open while playing Forza to sync telemetry data.
 echo        To stop the bridge, press Ctrl+C or close this window.
@@ -33,7 +48,7 @@ echo.
 echo Launching SUSP.OS Calculator in default browser...
 start "" "index.html"
 
-:: 3. Run Node.js bridge in the foreground
+:: 4. Run Node.js bridge in the foreground
 where node >nul 2>&1
 if %errorlevel% equ 0 (
     node "forza-bridge.js"

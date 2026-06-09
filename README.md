@@ -368,25 +368,55 @@ The header and pinned footer respect device safe areas (`env(safe-area-inset-*)`
 
 ---
 
-## How It Works
+## How It Works & Architecture
 
-The entire app is a single HTML file containing:
-- **Physics engine** — `flatRideRearHz`, `computeTune`, `computeAlignment`, `computeDiff` — pure JS, no React dependency
-- **React UI** — in-browser JSX transpilation via `@babel/standalone`
-- **Persistence** — `localStorage` via a custom `usePersist` hook; degrades gracefully in private browsing
-- **Share codec** — pipe-delimited numeric array, Base64-encoded (~210 chars, 54 values, fully backward-compatible — short legacy codes decode with new fields defaulted)
+The application is structured as a modular codebase under `src/` that compiles into a single self-contained, offline-capable `index.html` file using a zero-dependency build-time assembler:
 
-The physics functions are at the top of the `<script>` block and can be read, tested, or extracted independently. A standalone test suite is included in `tests.js` — run with `node tests.js`.
+- **Source Layout (`src/`)**:
+  - `src/physics.js`: Core physics engine, algorithms (`flatRideRearHz`, `computeTune`, `computeAlignment`, `computeDiff`), constants, and solver calculations.
+  - `src/codec.js`: Base64 share code encoder, decoder, and input sanitization logic.
+  - `src/app.jsx`: React application UI, state, event handlers, and telemetry visualization.
+  - `src/components/`: Sub-components of the UI (arranged alphabetically/numerically).
+  - `src/styles.css`: Stylesheets and CSS variables.
+  - `src/index.template.html`: Raw HTML structure acting as the template into which assets are injected.
+  - `src/bootstrap.js`: Client-side startup script that mounts the React application.
+
+- **Build-Time Assembly**:
+  - `assemble.js`: A zero-dependency script that compiles and packages the split modular source files under `src/` into the root-level `index.html`. It normalizes all newlines to `\n` to guarantee a deterministic byte-for-byte output across platforms.
+  - Compile the application by running:
+    ```bash
+    node assemble.js
+    ```
+  - **Automatic Compilation**: The Windows launcher `launch.bat` executes `node assemble.js` automatically every time you start the app, ensuring that you are always running the latest version of the code.
 
 ---
 
-## Development
+## Development & Testing
 
-No build tools required. Open `index.html` in a browser, edit with any text editor, reload to see changes.
+During development, write modular code under `src/`. Do not edit `index.html` directly, as it will be overwritten during assembly.
 
-```
-node tests.js   # run physics unit tests
-```
+A comprehensive test suite is located in the root directory and can be run using Node.js (v16+):
+
+- **Running Tests**:
+  - Run the complete test suite:
+    ```bash
+    node tests.js
+    ```
+  - This command runs:
+    1. **Synchronization Check**: Verifies that the compiled root-level `index.html` is byte-for-byte identical to the in-memory assembly of the files under `src/`. If they are out of sync, it outputs a loud error instructing you to run `node assemble.js`.
+    2. **Unit Tests (135 tests)**: Verifies internal physics functions, load transfer calculations, telemetry parser profiles, weight estimators, state machine flows, and share code codecs.
+    3. **Regression Suite (115 tests)**: Validates complex solver outputs and codec round-trips against a baseline snapshot of expected results.
+
+- **Regression Runner**:
+  - The regression test runner is defined in `tests/regression-runner.js`. It compares calculated outputs against the baseline snapshots stored in `tests/fixtures/regression_suite.json`.
+  - It utilizes a tolerance of `1e-5` for raw floating-point calculation values and requires exact matches for strings, booleans, enums, share codes, and rounded UI clicks.
+
+- **Regenerating Snapshot Fixtures**:
+  - If you intentionally change physics constants, logic, or equations, you must regenerate the baseline regression snapshots:
+    ```bash
+    node tests/generate-regression-fixtures.js
+    ```
+  - This script compiles the physics and codec block, runs the test scenarios, and writes the updated baselines to `tests/fixtures/regression_suite.json`.
 
 ---
 
